@@ -1,0 +1,13 @@
+<launch>
+
+    <!--&lt;!&ndash; start SAETTA system using platform simulator &ndash;&gt;-->
+    <!--<node name="saetta_simulator" pkg="saetta_energy" type="simulator.py" output="screen"/>-->
+    <!--<node name="action_tracker" pkg="saetta_energy" type="tracker.py" output="screen"/>-->
+
+    <node name="energy_monitor" pkg="saetta_energy" type="energy_monitor.py" output="screen">
+        <param name="battery_capacity" value="1800" type="double"/>
+        <param name="rate_publish" value="2" type="double"/>
+        <param name="rate_update" value="2" type="double"/>
+    </node>
+
+</launch>
