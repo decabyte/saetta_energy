@@ -10,7 +10,7 @@ import roslib
 roslib.load_manifest('saetta_energy')
 
 from saetta_energy.msg import EnergyReport, EnergyStatus
-from vehicle_msgs.msg import ThrusterFeedback
+from vehicle_interface.msg import ThrusterFeedback
 
 # config
 DEFAULT_BAT = 1800.0    # battery pack capacity for Nessie AUV (Wh)

@@ -11,7 +11,7 @@
         <include file="$(find thrusters_controller)/launch/driver.launch"/>
 
         <!-- load configuration for real ops -->
-        <rosparam if="$(optenv MODEL 0)" command="load" file="$(find vehicle_core)/conf/pid_real.yaml"/>
+        <rosparam unless="$(optenv MODEL 0)" command="load" file="$(find vehicle_core)/conf/pid_real.yaml"/>
         <rosparam if="$(optenv MODEL 0)" command="load" file="$(find vehicle_core)/conf/pid_real_model.yaml"/>
 
         <rosparam command="load" file="$(find vehicle_core)/conf/vehicle_model.yaml"/>
@@ -33,13 +33,13 @@
 
 
     <!-- start the vehicle controller -->
-    <node name="vehicle_pilot" pkg="vehicle_core" type="pilot_node.py" args="-v" output="screen">
+    <node name="vehicle_pilot" pkg="vehicle_core" type="node_pilot.py" args="-v" output="screen">
         <!-- redirect output -->
         <param name="topic_output" value="thrusters/request"/>
     </node>
 
     <!-- start the thruster wrapper -->
-    <node name="thrusters_wrapper" pkg="vehicle_diagnostics" type="thrusters_wrapper.py" output="screen">
+    <node name="thruster_wrapper" pkg="saetta_energy" type="node_thruster_wrapper.py" output="screen">
         <!-- set topics input and outputs -->
         <param name="req_input" value="thrusters/request"/>
         <param name="req_output" value="thrusters/commands"/>
