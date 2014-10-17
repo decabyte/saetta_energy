@@ -1,0 +1,13 @@
+<launch>
+
+    <!-- start the thruster wrapper -->
+    <node name="thrusters_wrapper" pkg="vehicle_diagnostics" type="thrusters_wrapper.py" output="screen">
+        <!-- set topics input and outputs -->
+        <param name="req_input" value="thrusters/request"/>
+        <param name="req_output" value="thrusters/commands"/>
+
+        <param name="feed_input" value="thrusters/status"/>
+        <param name="feed_output" value="thrusters/feedback"/>
+    </node>
+
+</launch>

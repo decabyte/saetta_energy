@@ -4,19 +4,15 @@
      saetta_energy
 
   </description>
-  <author>decabyte</author>
-  <license>BSD</license>
+  <author>Valerio De Carolis</author>
+  <license>MIT</license>
   <review status="unreviewed" notes=""/>
   <url>http://ros.org/wiki/saetta_energy</url>
 
   <depend package="rospy"/>
-  <depend package="std_msgs"/>
   <depend package="diagnostic_msgs"/>
-
-  <depend package="vehicle_msgs"/>
-
-  <!--<depend package="planning_msgs"/>-->
-  <!--<depend package="auv_msgs"/>-->
+  <depend package="vehicle_interface"/>
+  <depend package="vehicle_core"/>
 
 </package>
 

@@ -1,0 +1,76 @@
+<launch>
+
+    <!--
+        run example:
+        SIMULATION=1 roslaunch vehicle_diagnostics test_diagnostics.launch fault_control:=true fault_speeds:=true
+    -->
+
+    <!-- revert to real if SIMULATION is not set -->
+    <group unless="$(optenv SIMULATION 0)">
+        <!-- start the thruster driver -->
+        <include file="$(find thrusters_controller)/launch/driver.launch"/>
+
+        <!-- load configuration for real ops -->
+        <rosparam if="$(optenv MODEL 0)" command="load" file="$(find vehicle_core)/conf/pid_real.yaml"/>
+        <rosparam if="$(optenv MODEL 0)" command="load" file="$(find vehicle_core)/conf/pid_real_model.yaml"/>
+
+        <rosparam command="load" file="$(find vehicle_core)/launch/vehicle_model.yaml"/>
+    </group>
+
+    <!-- revert to simulation if SIMULATION is set -->
+    <group if="$(optenv SIMULATION 0)">
+        <rosparam command="load" file="$(find vehicle_core)/conf/pid_sim.yaml"/>
+        <rosparam command="load" file="$(find vehicle_core)/conf/simulation_model.yaml"/>
+    </group>
+
+    <!-- script config logic -->
+    <arg name="fault_control" default="false"/>
+    <arg name="fault_speeds" default="false"/>
+
+    <param name="pilot/adaptive_yaw" value="false"/>
+    <param name="pilot/fault_control" value="$(arg fault_control)"/>
+    <param name="pilot/fault_speeds" value="$(arg fault_speeds)"/>
+
+
+    <!-- start the vehicle controller -->
+    <node name="vehicle_pilot" pkg="vehicle_core" type="pilot_node.py" args="-v" output="screen">
+        <!-- redirect output -->
+        <param name="topic_output" value="thrusters/request"/>
+    </node>
+
+    <!-- start the thruster wrapper -->
+    <node name="thrusters_wrapper" pkg="vehicle_diagnostics" type="thrusters_wrapper.py" output="screen">
+        <!-- set topics input and outputs -->
+        <param name="req_input" value="thrusters/request"/>
+        <param name="req_output" value="thrusters/commands"/>
+
+        <param name="feed_input" value="thrusters/status"/>
+        <param name="feed_output" value="thrusters/feedback"/>
+    </node>
+
+    <!-- load the config and start the thrusters model (this is used for diagnostics) -->
+    <rosparam command="load" file="$(find vehicle_core)/conf/thruster_model.yaml"/>
+
+    <node name="thrusters_model" pkg="vehicle_core" type="thrusters_simulator.py" output="screen">
+        <!-- set topics input and outputs -->
+        <param name="topic_input" value="thrusters/request"/>
+        <param name="topic_feedback" value="thrusters/model"/>
+        <param name="topic_forces" value="forces/model"/>
+    </node>
+
+    <!-- start the thruster diagnostic node -->
+    <node name="thrusters_monitor" pkg="vehicle_diagnostics" type="thrusters_monitor.py" output="screen">
+        <!-- set topics input and outputs -->
+        <param name="topic_input_real" value="thrusters/feedback"/>
+        <param name="topic_input_model" value="thrusters/model"/>
+
+        <param name="sample_window" value="20" type="int"/>
+    </node>
+
+    <!-- start the path controller -->
+    <node name="path_controller" pkg="vehicle_core" type="path_controller.py" output="screen"/>
+
+    <!-- run also energy system -->
+    <include file="$(find saetta_energy)/launch/standalone.launch"/>
+
+</launch>
