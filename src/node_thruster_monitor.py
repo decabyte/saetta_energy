@@ -5,14 +5,15 @@ from __future__ import division
 import numpy as np
 np.set_printoptions(precision=3, suppress=True)
 
+from pykalman import KalmanFilter
+
 import rospy
 import roslib
 roslib.load_manifest('saetta_energy')
 
+from vehicle_interface.msg import ThrusterFeedback, FloatArrayStamped
 # import thrusters_config as tc
 # import thrusters_model as tm
-
-from vehicle_interface.msg import ThrusterFeedback, FloatArrayStamped
 
 # constants
 TOPIC_MODEL = 'thrusters/model'
@@ -30,6 +31,9 @@ NOMINAL_VOLTAGE = 28.0      # assumed constant
 SAMPLE_WINDOW = 20  # samples
 SAMPLE_TIME = 0.1   # secs
 
+OFFSET_MODEL = 0
+OFFSET_REAL = 1
+
 
 class ThrustersMonitor(object):
     def __init__(self, name, topic_input_model, topic_input_real, sample_window):
@@ -39,6 +43,26 @@ class ThrustersMonitor(object):
         self.real_current = np.zeros((6, sample_window))
         self.model_current = np.zeros((6, sample_window))
         self.integrated_error = np.zeros((6, 1))
+
+        # data fusion using kalman filter
+        self.n_dim_state = 1
+        self.n_dim_obs = 2
+        self.kf_Q = 1.0
+        self.kf_R = np.array([
+            [1.0, 0.0],
+            [0.0, 0.1]
+        ])
+
+        self.kf_mean = np.zeros(self.n_dim_state)
+        self.kf_covariances = np.zeros((self.n_dim_state, self.n_dim_state))
+        self.measurements = np.zeros(self.n_dim_obs)
+
+        self.kf = KalmanFilter(
+            n_dim_state=self.n_dim_state,
+            n_dim_obs=self.n_dim_obs,
+            transition_covariance=self.kf_Q,
+            observation_covariance=self.kf_R
+        )
 
         # subscribers
         self.sub_model = rospy.Subscriber(topic_input_model, ThrusterFeedback, self.handle_model, queue_size=1)
@@ -69,13 +93,57 @@ class ThrustersMonitor(object):
         #max_throttle = np.ones(6) * tc.MAX_THROTTLE
         #max_error = SAMPLE_TIME * self.sample_window * tm.thruster_model_current(max_throttle)
 
+        self.x = np.zeros((3, 100))
+        self.t = np.linspace(0, 10, 100)
+        self.n = 0
+
+
         while not rospy.is_shutdown():
+
+            # observer filtering
+            #means, covariances = kf.filter(measurements)
+            self.measurements[0] = self.model_current[0, -2]
+            self.measurements[1] = self.real_current[0, -1]
+
+            self.kf_mean, self.kf_covariances = self.kf.filter_update(
+                self.kf_mean, self.kf_covariances, self.measurements
+            )
+
             # compensate for time delays (warning)
-            self.integrated_error = np.trapz(self.model_current[:, 0:-2] - self.real_current[:, 1:-1], dx=SAMPLE_TIME)  # absolute error
-            #self.integrated_error = (self.integrated_error / max_error) * 100                         # normalised error
+            delta = self.model_current[:, 0:-2] - self.real_current[:, 1:-1]
+            self.integrated_error = np.trapz(delta, dx=SAMPLE_TIME)
 
             self.send_error_msg()
             self.l_rate.sleep()
+
+            # debug
+            self.kf.observation_covariance[0,0] = np.clip(delta[0,-1] * 10, 2.0, 20.0)
+
+            print(' err: %s\n  mean: %s\n  cov: %s\n  R: %s\n' % (
+                self.integrated_error[0],
+                self.kf_mean,
+                self.kf_covariances,
+                self.kf.observation_covariance
+            ))
+
+            self.x[0, self.n] = self.measurements[0]
+            self.x[1, self.n] = self.measurements[1]
+            self.x[2, self.n] = self.kf_mean
+            self.n += 1
+
+            if self.n > 99:
+                break
+
+
+
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots()
+        ax.plot(self.t, self.x[0, :], 'b--')
+        ax.plot(self.t, self.x[1, :], 'g--')
+        ax.plot(self.t, self.x[2, :], 'r')
+        ax.legend(['model', 'measurement', 'fusion'])
+        plt.show()
 
 
     # it is assumed that the messages will come synchronously
@@ -95,11 +163,6 @@ class ThrustersMonitor(object):
 
 
     def callback_energy(self, event):
-        # calculate the total energy usage for the thrusters subsystem
-        #   adding an extra field at the end of the energy array
-        #self.model_energy[6, 0] = np.sum(self.model_energy[0:6, 0])
-        #self.real_energy[6, 0] = np.sum(self.real_energy[0:6, 0])
-
         # send messages
         msg = FloatArrayStamped()
         msg.header.stamp = rospy.Time.now()
