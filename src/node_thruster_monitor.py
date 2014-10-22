@@ -9,8 +9,9 @@ import rospy
 import roslib
 roslib.load_manifest('saetta_energy')
 
-# import thrusters_config as tc
-# import thrusters_model as tm
+from vehicle_core.model import throttle_model as th
+from vehicle_core.model import thruster_model as tm
+from vehicle_core.config import thrusters_config as tc
 
 from vehicle_interface.msg import ThrusterFeedback, FloatArrayStamped
 
@@ -78,7 +79,16 @@ class ThrustersMonitor(object):
             self.l_rate.sleep()
 
 
-    # it is assumed that the messages will come synchronously
+    def handle_input(self, data):
+        request = np.array(data.throttle)
+
+        predicted_throttle = th.predict_throttle(request, tc.LPF[0], tc.LPF[1], tc.LPF_DELAY, tc.MAX_THROTTLE)
+        predicted_throttle = tm.rate_limiter(self.last_throttle, predicted_throttle)    # TODO: add limits
+        estimated_current = tm.estimate_current(predicted_throttle, tc.THROTTLE_TO_CURRENT)
+
+        pass
+
+
     def handle_model(self, msg):
         self.model_current = np.roll(self.model_current, -1, axis=1)
         self.model_current[:, -1] = msg.current
