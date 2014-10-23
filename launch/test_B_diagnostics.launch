@@ -3,18 +3,11 @@
     <!-- load the config and start the thrusters model (this is used for diagnostics) -->
     <rosparam command="load" file="$(find vehicle_core)/conf/thruster_model.yaml"/>
 
-    <node name="thrusters_model" pkg="vehicle_core" type="node_thruster_sim.py" output="screen">
-        <!-- set topics input and outputs -->
-        <param name="topic_input" value="thrusters/request"/>
-        <param name="topic_feedback" value="thrusters/model"/>
-        <param name="topic_forces" value="forces/model"/>
-    </node>
-
     <!-- start the thruster diagnostic node -->
     <node name="thrusters_monitor" pkg="saetta_energy" type="node_thruster_monitor.py" output="screen">
         <!-- set topics input and outputs -->
+        <param name="topic_input_req" value="thrusters/request"/>
         <param name="topic_input_real" value="thrusters/feedback"/>
-        <param name="topic_input_model" value="thrusters/model"/>
 
         <param name="sample_window" value="20" type="int"/>
     </node>
