@@ -1,7 +1,7 @@
 <launch>
 
     <!-- start the thruster wrapper -->
-    <node name="thrusters_wrapper" pkg="saetta_energy" type="node_thruster_wrapper.py" output="screen">
+    <node name="thruster_wrapper" pkg="saetta_energy" type="node_thruster_wrapper.py" output="screen">
         <!-- set topics input and outputs -->
         <param name="req_input" value="thrusters/request"/>
         <param name="req_output" value="thrusters/commands"/>

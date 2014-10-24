@@ -1,19 +1,12 @@
 <launch>
 
     <!-- start the thruster wrapper -->
-    <node name="thrusters_wrapper" pkg="saetta_energy" type="node_thruster_wrapper.py" output="screen">
-        <!-- set topics input and outputs -->
-        <param name="req_input" value="thrusters/request"/>
-        <param name="req_output" value="thrusters/commands"/>
-
-        <param name="feed_input" value="thrusters/status"/>
-        <param name="feed_output" value="thrusters/feedback"/>
-    </node>
+    <include file="$(find saetta_energy)/launch/thruster_wrapper.launch"/>
 
     <!-- start the thrusters model (this is used for diagnostics) -->
     <rosparam command="load" file="$(find vehicle_core)/conf/thruster_model.yaml"/>
 
-    <node name="thrusters_model" pkg="vehicle_core" type="thrusters_simulator.py" output="screen">
+    <node name="thruster_model" pkg="vehicle_core" type="thrusters_simulator.py" output="screen">
         <!-- set topics input and outputs -->
         <param name="topic_input" value="thrusters/request"/>
         <param name="topic_feedback" value="thrusters/model"/>
@@ -21,7 +14,7 @@
     </node>
 
     <!-- start the thruster diagnostic node -->
-    <node name="thrusters_monitor" pkg="vehicle_core" type="thrusters_monitor.py" output="screen">
+    <node name="thruster_monitor" pkg="saetta_energy" type="node_thruster_monitor.py" output="screen">
         <!-- set topics input and outputs -->
         <param name="topic_input_real" value="thrusters/feedback"/>
         <param name="topic_input_model" value="thrusters/model"/>

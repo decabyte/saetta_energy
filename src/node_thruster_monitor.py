@@ -3,6 +3,8 @@
 from __future__ import division
 
 import numpy as np
+from vehicle_core.model.throttle_model import rate_limiter
+
 np.set_printoptions(precision=3, suppress=True)
 
 import time
@@ -119,7 +121,7 @@ class ThrustersMonitor(object):
         self.throttle_request[:, -1] = np.zeros(6)
 
         # rate limiter
-        self.predicted_throttle = tm.rate_limiter(
+        self.predicted_throttle = th.rate_limiter(
             self.predicted_throttle, self.last_throttle,
             rising_limit=tc.THROTTLE_RISING_LIMIT, falling_limit=tc.THROTTLE_FALLING_LIMIT
         )
