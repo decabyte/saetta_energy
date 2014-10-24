@@ -12,20 +12,20 @@ roslib.load_manifest('saetta_energy')
 from saetta_energy.msg import EnergyReport, EnergyStatus
 from vehicle_interface.msg import ThrusterFeedback
 
-# config
-DEFAULT_BAT = 1800.0    # battery pack capacity for Nessie AUV (Wh)
-TS_UPDATE = 2.0         # sec
-TS_PUBLISH = 4.0        # sec
-AVG_TIME = 60.0         # sec
 
-THR_RATE = 10.0             # Hz
-THR_FRAME = 1 / THR_RATE    # sec
-THR_VNOM = 28.0             # volts
-BAT_VNOM = 28.0             # volts
+# config
+DEFAULT_BAT = 1800.0            # battery pack capacity for Nessie AUV (Wh)
+TS_UPDATE = 1.0                 # sec
+TS_PUBLISH = 2.0                # sec
+AVG_TIME = 60.0                 # sec
+
+THR_RATE = 10.0                 # Hz
+THR_FRAME = 1.0 / THR_RATE      # sec
+THR_VNOM = 28.0                 # volts
+BAT_VNOM = 28.0                 # volts
 
 TOPIC_GLOBAL = 'saetta/report'
 TOPIC_THRUSTERS = 'thrusters/status'
-
 
 
 class EnergyMonitor(object):
