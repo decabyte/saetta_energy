@@ -3,11 +3,7 @@
 from __future__ import division
 
 import numpy as np
-from vehicle_core.model.throttle_model import rate_limiter
-
 np.set_printoptions(precision=3, suppress=True)
-
-import time
 
 import rospy
 import roslib
