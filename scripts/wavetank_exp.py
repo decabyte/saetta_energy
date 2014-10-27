@@ -17,12 +17,12 @@ np.set_printoptions(precision=3, suppress=True)
 
 import rospy
 import roslib
-roslib.load_manifest('vehicle_diagnostics')
+roslib.load_manifest('saetta_energy')
 
 
 from diagnostic_msgs.msg import KeyValue
-from vehicle_msgs.msg import PathStatus, FloatArray, PilotRequest
-from vehicle_msgs.srv import PathService
+from vehicle_interface.msg import PathStatus, Vector6, PilotRequest
+from vehicle_interface.srv import PathService
 from saetta_energy.msg import EnergyReport
 
 
@@ -35,7 +35,7 @@ SRV_SWITCH = 'pilot/switch'
 
 # path description  (moving from A to B)
 OFFSET_A_NORTH = 1.0
-OFFSET_A_EAST = -1.5
+OFFSET_A_EAST = -1.8
 OFFSET_B_NORTH = 4.4    # length of the tank's usable space away from our desks
 OFFSET_B_EAST = -9.8    # length of the tank's usable space along our desks
 
@@ -91,150 +91,16 @@ class WavetankExperiment(object):
 
         # ros interface
         self.srv_path = rospy.ServiceProxy(SRV_PATH, PathService)
-        self.sub_pil = rospy.Subscriber(
-            TOPIC_STATUS, PathStatus, self.handle_status, queue_size=5)
-        self.sub_energy = rospy.Subscriber(
-            TOPIC_ENERGY, EnergyReport, self.handle_energy)
-
+        self.sub_pil = rospy.Subscriber(TOPIC_STATUS, PathStatus, self.handle_status, queue_size=5)
+        self.sub_energy = rospy.Subscriber(TOPIC_ENERGY, EnergyReport, self.handle_energy)
         # self.pub_pos = rospy.Publisher(TOPIC_POS, PilotRequest, queue_size=1)
 
-    def run(self):
-        # check data file
-        self.check_export()
 
-        # reset the path controller
-        try:
-            self.srv_path.call(command='reset')
-        except Exception:
-            rospy.logerr('%s unable to communicate with path service ...')
-
-        # calculate offsets and points
-        rot_matrix = np.array([
-            [np.cos(self.theta), -np.sin(self.theta)],
-            [np.sin(self.theta), np.cos(self.theta)]
-        ])
-        xy_A = np.array([OFFSET_A_NORTH, OFFSET_A_EAST])
-        xy_A = np.dot(xy_A, rot_matrix)
-        xy_B = np.array([OFFSET_B_NORTH, OFFSET_B_EAST])
-        xy_B = np.dot(xy_B, rot_matrix)
-
-        self.points = np.array([
-            [xy_A[0], xy_A[1], DEPTH, 0, 0, 0],
-            [xy_B[0], xy_B[1], DEPTH, 0, 0, 0]
-        ])
-
-        self.points[:, 0] += X_OFFSET
-        self.points[:, 1] += Y_OFFSET
-
-        # reach initial point
-        rospy.loginfo('%s: reaching initial point ...', self.name)
-
-        path_points = [
-            # HWU wavetank
-            #FloatArray(self.points[0])
-
-            # simulation
-            FloatArray([0,0,1,0,0,0])
-        ]
-        options = [
-            # HWU wavetank
-            #KeyValue('mode', 'simple'),
-            #KeyValue('timeout', '10000')
-
-            # simulation
-            KeyValue('mode', 'simple'),
-            KeyValue('timeout', '10000')
-        ]
-
-        try:
-            self.wait = True
-            self.srv_path.call(
-                command='path', points=path_points, options=options)
-            self.srv_path.call(command='start')
-        except Exception:
-            self.wait = False
-            rospy.logerr('%s unable to communicate with path service ...')
-
-        while self.wait:
-            if rospy.is_shutdown():
-                sys.exit(-1)
-            else:
-                rospy.sleep(0.5)
-
-        # wait a little bit
-        rospy.sleep(5)
-
-        # experiment
-        rospy.loginfo('%s: starting experiment ...', self.name)
-
-        # path_points = [
-        #     FloatArray(self.points[0]),
-        #     FloatArray(self.points[1]),
-        #     FloatArray(self.points[0]),
-        #     FloatArray(self.points[0]),
-        #     FloatArray(self.points[1]),
-        #     FloatArray(self.points[0]),
-        # ]
-        # options = [
-        #   KeyValue('mode', 'lines'),
-        #   KeyValue('timeout', '10000')
-        # ]
-
-        path_points = [
-            # HWU wavetank
-            # FloatArray([1.0, -1.8, 1.0, 0, 0, 0]),
-            # FloatArray([4.4, -9.8, 1.0, 0, 0, 0]),
-            # FloatArray([1.0, -9.8, 1.0, 0, 0, 0]),
-            # FloatArray([4.4, -1.8, 1.0, 0, 0, 0]),
-            # FloatArray([1.0, -1.8, 1.0, 0, 0, 0]),
-
-            # simulation
-            FloatArray([0.0, 0.0, 1.0, 0, 0, 0]),
-            FloatArray([20.0, 20.0, 1.0, 0, 0, 0]),
-            FloatArray([0.0, 0.0, 1.0, 0, 0, 0]),
-        ]
-        options = [
-            KeyValue('mode', 'lines'),
-            KeyValue('timeout', '1000')
-        ]
-
-        try:
-            self.experiment_running = True
-            self.wait = True
-            self.energy_initial = self.energy_last
-            self.t_expire = time.time() + 1000
-            self.t_last = time.time()
-
-            rospy.loginfo('%s: requesting path ...', self.name)
-            self.srv_path.call(
-                command='path', points=path_points, options=options)
-            self.srv_path.call(command='start')
-
-        except Exception:
-            self.wait = False
-            rospy.logerr(
-                '%s unable to communicate with path service ...', self.name)
-
-        while self.wait:
-            if rospy.is_shutdown():
-                rospy.logerr('%s: experiment timeout ...', self.name)
-                break
-            elif self.t_last >= self.t_expire:
-                rospy.logerr('%s: ros is shutdown ...', self.name)
-                break
-            else:
-                rospy.sleep(0.5)
-
-        try:
-            self.srv_path.call(command='reset')
-        except Exception:
-            rospy.logerr(
-                '%s unable to communicate with path service ...', self.name)
-
-        rospy.loginfo('%s: experiment completed ...', self.name)
 
     def handle_energy(self, msg):
+        # parse energy data
         self.energy_last = msg.energy_used
+
 
     def handle_status(self, msg):
         self.path_info = {}
@@ -242,7 +108,7 @@ class WavetankExperiment(object):
         for pair in msg.info:
             self.path_info[pair.key] = pair.value
 
-        if 'path_completed' in self.path_info.keys():
+        if msg.path_status == PathStatus.PATH_COMPLETED:
             self.wait = False
 
             if self.experiment_running:
@@ -250,12 +116,12 @@ class WavetankExperiment(object):
                 self.experiment_running = False
 
                 # update counters
-                self.duration = float(
-                    self.path_info['time_completed']) - float(self.path_info['time_started'])
+                self.duration = float(self.path_info['time_completed']) - float(self.path_info['time_started'])
                 self.energy_used = self.energy_last - self.energy_initial
 
                 # dump experiment data
                 self.append_data()
+
 
     def check_export(self):
         if os.path.exists(self.csv_file):
@@ -302,6 +168,120 @@ class WavetankExperiment(object):
             writer.writerow(row)
 
 
+
+    def run(self):
+        # check data file
+        self.check_export()
+
+        # reset the path controller
+        try:
+            self.srv_path.call(command='reset')
+        except Exception:
+            rospy.logerr('%s unable to communicate with path service ...')
+
+        # calculate offsets and points
+        rot_matrix = np.array([
+            [np.cos(self.theta), -np.sin(self.theta)],
+            [np.sin(self.theta), np.cos(self.theta)]
+        ])
+        xy_A = np.array([OFFSET_A_NORTH, OFFSET_A_EAST])
+        xy_A = np.dot(xy_A, rot_matrix)
+        xy_B = np.array([OFFSET_B_NORTH, OFFSET_B_EAST])
+        xy_B = np.dot(xy_B, rot_matrix)
+
+        self.points = np.array([
+            [xy_A[0], xy_A[1], DEPTH, 0, 0, 0],
+            [xy_B[0], xy_B[1], DEPTH, 0, 0, 0]
+        ])
+
+        self.points[:, 0] += X_OFFSET
+        self.points[:, 1] += Y_OFFSET
+
+        # reach initial point
+        rospy.loginfo('%s: reaching initial point ...', self.name)
+
+        path_points = [
+            # HWU wavetank
+            Vector6(self.points[0])
+        ]
+        options = [
+            # HWU wavetank
+            KeyValue('mode', 'simple'),
+            KeyValue('timeout', '10000')
+        ]
+
+        try:
+            self.wait = True
+            self.srv_path.call(command='path', points=path_points, options=options)
+            self.srv_path.call(command='start')
+        except Exception:
+            self.wait = False
+            rospy.logerr('%s unable to communicate with path service ...')
+
+
+        while self.wait:
+            if rospy.is_shutdown():
+                sys.exit(-1)
+            else:
+                rospy.sleep(0.5)
+
+        # wait a little bit
+        rospy.sleep(5)
+
+        # experiment
+        rospy.loginfo('%s: starting experiment ...', self.name)
+
+
+        path_points = [
+            # HWU wavetank
+            Vector6([1.0, -1.8, DEPTH, 0, 0, 0.0]),
+            Vector6([4.4, -9.8, DEPTH, 0, 0, 0.0]),
+            Vector6([1.0, -9.8, DEPTH, 0, 0, 3.14]),
+            Vector6([4.4, -1.8, DEPTH, 0, 0, 0.0]),
+            Vector6([1.0, -1.8, DEPTH, 0, 0, 3.14]),
+        ]
+        options = [
+            KeyValue('mode', 'lines'),
+            KeyValue('timeout', '1000')
+        ]
+
+
+        try:
+            self.experiment_running = True
+            self.wait = True
+            self.energy_initial = self.energy_last
+            self.t_expire = time.time() + 1000
+            self.t_last = time.time()
+
+            rospy.loginfo('%s: requesting path ...', self.name)
+            self.srv_path.call(command='path', points=path_points, options=options)
+            self.srv_path.call(command='start')
+
+        except Exception:
+            self.wait = False
+            rospy.logerr('%s unable to communicate with path service ...', self.name)
+
+
+        while self.wait:
+            if rospy.is_shutdown():
+                rospy.logerr('%s: experiment timeout ...', self.name)
+                break
+            elif self.t_last >= self.t_expire:
+                rospy.logerr('%s: ros is shutdown ...', self.name)
+                break
+            else:
+                rospy.sleep(0.5)
+
+        try:
+            self.srv_path.call(command='reset')
+        except Exception:
+            rospy.logerr('%s unable to communicate with path service ...', self.name)
+
+        # congratulations!
+        rospy.loginfo('%s: experiment completed ...', self.name)
+
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Utility for running wavetank experiments using the path controller.',
@@ -309,13 +289,10 @@ if __name__ == '__main__':
     )
 
     # navigation group
-    parser.add_argument(
-        'yaw_offset', type=float, 
-        help='Yaw offset between magnetic north and wavetank coordinates.'
-    )
-
     # parser.add_argument('n_offset', type=float, help='North offset of initial point in wavetank coordinates.')
     # parser.add_argument('e_offset', type=float, help='East offset of initial point in wavetank coordinates.')
+    parser.add_argument('yaw_offset', type=float, help='Yaw offset between magnetic north and wavetank coordinates.')
+    parser.add_argument('mode', type=float, help='Select the navigation mode.')
 
     # output group
     parser.add_argument(
