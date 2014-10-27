@@ -66,7 +66,7 @@ class WavetankExperiment(object):
         self.energy_last = 0
 
         # status
-        self.path_info = {}
+        self.time_started = 0
         self.experiment_running = False
 
         # export data
@@ -103,10 +103,8 @@ class WavetankExperiment(object):
 
 
     def handle_status(self, msg):
-        self.path_info = {}
-
-        for pair in msg.info:
-            self.path_info[pair.key] = pair.value
+        # values
+        self.time_started = msg.time_start
 
         if msg.path_status == PathStatus.PATH_COMPLETED:
             self.wait = False
@@ -116,7 +114,7 @@ class WavetankExperiment(object):
                 self.experiment_running = False
 
                 # update counters
-                self.duration = float(self.path_info['time_completed']) - float(self.path_info['time_started'])
+                self.duration = msg.time_elapsed
                 self.energy_used = self.energy_last - self.energy_initial
 
                 # dump experiment data
@@ -157,7 +155,7 @@ class WavetankExperiment(object):
             point_b = list(self.points[1])
 
             row = list()
-            row.append(self.path_info['time_started'])
+            row.append(self.time_started)
             row.append(self.theta)
             row.extend(point_a)
             row.extend(point_b)
@@ -270,7 +268,7 @@ class WavetankExperiment(object):
                 rospy.logerr('%s: ros is shutdown ...', self.name)
                 break
             else:
-                rospy.sleep(0.5)
+                rospy.sleep(2.0)
 
         try:
             self.srv_path.call(command='reset')
@@ -292,18 +290,11 @@ if __name__ == '__main__':
     # parser.add_argument('n_offset', type=float, help='North offset of initial point in wavetank coordinates.')
     # parser.add_argument('e_offset', type=float, help='East offset of initial point in wavetank coordinates.')
     parser.add_argument('yaw_offset', type=float, help='Yaw offset between magnetic north and wavetank coordinates.')
-    parser.add_argument('mode', type=float, help='Select the navigation mode.')
+    parser.add_argument('--mode', default='lines', help='Select the navigation mode.')
 
     # output group
-    parser.add_argument(
-        '--output', default='last',
-        help='Output file to save during the experiments.'
-    )
-
-    parser.add_argument(
-        '-v', '--verbose', action='store_true',
-        help='Print detailed information.'
-    )
+    parser.add_argument('--output', default='last', help='Output file to save during the experiments.')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Print detailed information.')
 
     args = parser.parse_args()
 
