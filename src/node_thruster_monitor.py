@@ -15,6 +15,8 @@ from vehicle_core.config import thrusters_config as tc
 
 from vehicle_interface.msg import ThrusterCommand, ThrusterFeedback, FloatArrayStamped
 
+#import kalman
+
 # constants
 TOPIC_REQ = 'thrusters/commands'
 TOPIC_MODEL = 'thrusters/model'
@@ -51,6 +53,20 @@ class ThrustersMonitor(object):
         self.model_delay = int(kwargs.get('model_delay', 0))
         self.rising_limit = float(kwargs.get('rising_limit', tc.THROTTLE_RISING_LIMIT))
         self.falling_limit = float(kwargs.get('falling_limit', tc.THROTTLE_FALLING_LIMIT))
+
+
+        # # kalman filter
+        # self.n_state = 1
+        # self.n_observation = 2
+        #
+        # self.kf = kalman.KalmanFilter(self.n_state, self.n_observation)
+        # self.kf.Q[0,0] = 1000.0
+        # self.kf.R[0,0] = 1.0
+        # self.kf.R[1,1] = 1.0
+        #
+        # self.n = 0
+        # self.data = np.zeros((3, 100))
+
 
         # subscribers
         self.sub_req = rospy.Subscriber(topic_input_req, ThrusterCommand, self.handle_req, tcp_nodelay=True, queue_size=3)
@@ -135,6 +151,43 @@ class ThrustersMonitor(object):
         # compensate for time delays (warning)
         self.diag_metric = np.trapz(self.model_current[:, 0:-2] - self.real_current[:, 1:-1], dx=SAMPLE_TIME)
 
+        # # data fusion (using kalman filter)
+        # measurements = np.array([
+        #     # self.real_current[0, -1],
+        #     # self.model_current[0, -1],
+        #
+        #     self.model_current[0, -1],
+        #     self.real_current[0, -1]
+        # ])
+        # mean, cov = self.kf.update(measurements)
+        #
+        # print('mean: %s' % mean)
+        # print('cov: %s' % cov)
+        #
+        # # store data
+        # self.data[0, self.n] = self.model_current[0, -1]
+        # self.data[1, self.n] = self.real_current[0, -1]
+        # self.data[2, self.n] = mean
+        #
+        # self.n += 1
+        #
+        # if self.n >= self.data.shape[1]:
+        #     print('kf plot')
+        #
+        #     import matplotlib.pyplot as plt
+        #
+        #     t = np.linspace(0, 10, self.data.shape[1])
+        #
+        #     plt.figure()
+        #     plt.plot(t, self.data[0,:], 'b--', label='sensor #1')
+        #     plt.plot(t, self.data[1,:], 'g--', label='sensor #2')
+        #     plt.plot(t, self.data[2,:], 'r', label='fusion')
+        #     plt.legend()
+        #     plt.show()
+        #
+        #     rospy.signal_shutdown('kf end')
+
+
         # shift status buffer and zero the new entry (in case no further messages are sent from the controller)
         self.real_current = np.roll(self.real_current, -1, axis=1)
         self.real_current[:, -1] = np.zeros(6)
@@ -183,4 +236,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
