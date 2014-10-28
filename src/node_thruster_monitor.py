@@ -12,10 +12,9 @@ roslib.load_manifest('saetta_energy')
 from vehicle_core.model import throttle_model as th
 from vehicle_core.model import thruster_model as tm
 from vehicle_core.config import thrusters_config as tc
+from vehicle_core.util import kalman
 
 from vehicle_interface.msg import ThrusterCommand, ThrusterFeedback, FloatArrayStamped
-
-#import kalman
 
 # constants
 TOPIC_REQ = 'thrusters/commands'
@@ -60,6 +59,8 @@ class ThrustersMonitor(object):
         # self.n_observation = 2
         #
         # self.kf = kalman.KalmanFilter(self.n_state, self.n_observation)
+        # self.kf.H[0,0] = 1    # measurement matrix should have ones in order to use all the sensors
+        # self.kf.H[1,0] = 1
         # self.kf.Q[0,0] = 1000.0
         # self.kf.R[0,0] = 1.0
         # self.kf.R[1,1] = 1.0
@@ -76,12 +77,6 @@ class ThrustersMonitor(object):
         self.pub_model = rospy.Publisher(TOPIC_MODEL, ThrusterFeedback, tcp_nodelay=True, queue_size=1)
         self.pub_diag = rospy.Publisher(TOPIC_DIAG, FloatArrayStamped, tcp_nodelay=True, queue_size=1)
 
-        # energy related
-        #self.real_energy = np.zeros(6)
-        #self.model_energy = np.zeros(6)
-        #self.pub_real_en = rospy.Publisher(TOPIC_ENERGY_REAL, FloatArrayStamped, queue_size=1)
-        #self.pub_model_en = rospy.Publisher(TOPIC_ENERGY_MODEL, FloatArrayStamped, queue_size=1)
-        #self.t_energy = rospy.Timer(rospy.Duration(1.0 / ENERGY_RATE), self.send_energy)
 
 
     def send_diagnostics(self):
@@ -96,20 +91,6 @@ class ThrustersMonitor(object):
         msg.throttle = self.predicted_throttle
         msg.current = self.model_current[:, -1]
         self.pub_model.publish(msg)
-
-    # def send_energy(self, event=None):
-    #     # measured energy
-    #     msg = FloatArrayStamped()
-    #     msg.header.stamp = rospy.Time.now()
-    #     msg.values = self.real_energy.flatten().tolist()
-    #     self.pub_real_en.publish(msg)
-    #
-    #     # model energy
-    #     msg = FloatArrayStamped()
-    #     msg.header.stamp = rospy.Time.now()
-    #     msg.values = self.model_energy.flatten().tolist()
-    #     self.pub_model_en.publish(msg)
-
 
     def run(self):
         while not rospy.is_shutdown():
@@ -213,8 +194,6 @@ def main():
     topic_input_req = rospy.get_param('~topic_input_req', TOPIC_REQ)
     topic_input_real = rospy.get_param('~topic_input_real', TOPIC_REAL)
     topic_diagnostics = rospy.get_param('~topic_diagnostics', TOPIC_DIAG)
-    #topic_energy_model = rospy.get_param('~topic_energy_model', TOPIC_ENERGY_MODEL)
-    #topic_energy_real = rospy.get_param('~topic_energy_real', TOPIC_ENERGY_REAL)
 
     # show configuration
     rospy.loginfo('%s: monitor init ... ', name)
@@ -222,8 +201,6 @@ def main():
     rospy.loginfo('%s: topic input real: %s', rospy.get_name(), topic_input_real)
     rospy.loginfo('%s: topic diagnostics: %s', rospy.get_name(), topic_diagnostics)
     rospy.loginfo('%s: sample window: %s', rospy.get_name(), sample_window)
-    #rospy.loginfo('%s: topic energy model: %s', rospy.get_name(), topic_energy_model)
-    #rospy.loginfo('%s: topic energy real: %s', rospy.get_name(), topic_energy_real)
 
     # init monitor
     tm = ThrustersMonitor(name, topic_input_req, topic_input_real, sample_window, **config)
