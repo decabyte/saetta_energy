@@ -27,7 +27,7 @@
     <arg name="fault_control" default="false"/>
     <arg name="fault_speeds" default="false"/>
 
-    <param name="pilot/adaptive_yaw" value="false"/>
+    <!-- <param name="pilot/adaptive_yaw" value="false"/> -->
     <param name="pilot/fault_control" value="$(arg fault_control)"/>
     <param name="pilot/fault_speeds" value="$(arg fault_speeds)"/>
 
