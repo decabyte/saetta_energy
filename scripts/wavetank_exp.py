@@ -52,7 +52,7 @@ CSV_PREFIX = 'results'
 
 class WavetankExperiment(object):
 
-    def __init__(self, name, offset_yaw, offset_north=0, offset_east=0, suffix='last'):
+    def __init__(self, name, offset_yaw, offset_north=0, offset_east=0, suffix='last', **kwargs):
         self.name = name
 
         # flags
@@ -66,6 +66,7 @@ class WavetankExperiment(object):
         self.energy_last = 0
 
         # status
+        self.mode = kwargs.get('mode', 'lines')
         self.time_started = 0
         self.experiment_running = False
 
@@ -239,8 +240,9 @@ class WavetankExperiment(object):
             Vector6([1.0, -1.8, DEPTH, 0, 0, 3.14]),
         ]
         options = [
-            KeyValue('mode', 'lines'),
-            KeyValue('timeout', '1000')
+            KeyValue('mode', self.mode),
+            KeyValue('timeout', '1000'),
+            KeyValue('target_speed', '0.5')
         ]
 
 
@@ -251,7 +253,7 @@ class WavetankExperiment(object):
             self.t_expire = time.time() + 1000
             self.t_last = time.time()
 
-            rospy.loginfo('%s: requesting path ...', self.name)
+            rospy.loginfo('%s: requesting path (mode: %s) ...', self.name, self.mode)
             self.srv_path.call(command='path', points=path_points, options=options)
             self.srv_path.call(command='start')
 
@@ -322,7 +324,7 @@ if __name__ == '__main__':
 
     # run the experiment
     # offset_north=off_n, offset_east=off_e,
-    we = WavetankExperiment(name, offset_yaw=off_yaw, suffix=suffix)
+    we = WavetankExperiment(name, offset_yaw=off_yaw, suffix=suffix, mode=args.mode)
 
     try:
         we.run()
