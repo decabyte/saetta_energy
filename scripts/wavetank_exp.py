@@ -9,6 +9,7 @@ import sys
 import os
 import traceback
 import time
+import json
 import csv
 import argparse
 
@@ -57,7 +58,8 @@ class WavetankExperiment(object):
 
         # flags
         self.wait = True
-        self.path_points = None
+        self.path = kwargs['path']
+        self.path_points = list()
 
         self.cnt = 0
         self.duration = 0
@@ -178,6 +180,23 @@ class WavetankExperiment(object):
         except Exception:
             rospy.logerr('%s unable to communicate with path service ...')
 
+
+        # load path
+        try:
+            with open(self.path, 'rt') as f:
+                path_dict = json.loads(f.read())
+
+                for point in path_dict['points']:
+                    self.path_points.append(
+                        Vector6(point)
+                    )
+
+            rospy.loginfo('%s: loaded %s points ...', self.name, len(self.path_points))
+
+        except Exception as e:
+            rospy.logfatal('%s: error %s', self.name, e)
+            sys.exit(-1)
+
         # calculate offsets and points
         rot_matrix = np.array([
             [np.cos(self.theta), -np.sin(self.theta)],
@@ -199,7 +218,7 @@ class WavetankExperiment(object):
         # reach initial point
         rospy.loginfo('%s: reaching initial point ...', self.name)
 
-        path_points = [
+        path_initial = [
             # HWU wavetank
             Vector6(self.points[0])
         ]
@@ -211,7 +230,7 @@ class WavetankExperiment(object):
 
         try:
             self.wait = True
-            self.srv_path.call(command='path', points=path_points, options=options)
+            self.srv_path.call(command='path', points=path_initial, options=options)
             self.srv_path.call(command='start')
         except Exception:
             self.wait = False
@@ -231,18 +250,18 @@ class WavetankExperiment(object):
         rospy.loginfo('%s: starting experiment ...', self.name)
 
 
-        path_points = [
-            # HWU wavetank
-            Vector6([1.0, -1.8, DEPTH, 0, 0, 0.0]),
-            Vector6([4.4, -9.8, DEPTH, 0, 0, 0.0]),
-            Vector6([1.0, -9.8, DEPTH, 0, 0, 3.14]),
-            Vector6([4.4, -1.8, DEPTH, 0, 0, 0.0]),
-            Vector6([1.0, -1.8, DEPTH, 0, 0, 3.14]),
-        ]
-        options = [
+        # self.path_points = [
+        #     # HWU wavetank
+        #     Vector6([1.0, -1.8, DEPTH, 0, 0, 0.0]),
+        #     Vector6([4.4, -9.8, DEPTH, 0, 0, 0.0]),
+        #     Vector6([1.0, -9.8, DEPTH, 0, 0, 3.14]),
+        #     Vector6([4.4, -1.8, DEPTH, 0, 0, 0.0]),
+        #     Vector6([1.0, -1.8, DEPTH, 0, 0, 3.14]),
+        # ]
+        self.options = [
             KeyValue('mode', self.mode),
             KeyValue('timeout', '1000'),
-            KeyValue('target_speed', '0.5')
+            KeyValue('target_speed', '0.4')
         ]
 
 
@@ -254,7 +273,7 @@ class WavetankExperiment(object):
             self.t_last = time.time()
 
             rospy.loginfo('%s: requesting path (mode: %s) ...', self.name, self.mode)
-            self.srv_path.call(command='path', points=path_points, options=options)
+            self.srv_path.call(command='path', points=self.path_points, options=self.options)
             self.srv_path.call(command='start')
 
         except Exception:
@@ -293,6 +312,7 @@ if __name__ == '__main__':
     # parser.add_argument('e_offset', type=float, help='East offset of initial point in wavetank coordinates.')
     parser.add_argument('yaw_offset', type=float, help='Yaw offset between magnetic north and wavetank coordinates.')
     parser.add_argument('--mode', default='lines', help='Select the navigation mode.')
+    parser.add_argument('--path', help='Path file to execute (es. simple.json).')
 
     # output group
     parser.add_argument('--output', default='last', help='Output file to save during the experiments.')
@@ -322,9 +342,13 @@ if __name__ == '__main__':
         rospy.logfatal('%s: wrong input commands', name)
         sys.exit(-1)
 
+    if not os.path.exists(args.path):
+        rospy.logfatal('%s: file %s does not exists!', self.name, args.path)
+        sys.exit(-1) 
+
     # run the experiment
     # offset_north=off_n, offset_east=off_e,
-    we = WavetankExperiment(name, offset_yaw=off_yaw, suffix=suffix, mode=args.mode)
+    we = WavetankExperiment(name, offset_yaw=off_yaw, suffix=suffix, mode=args.mode, path=args.path)
 
     try:
         we.run()
