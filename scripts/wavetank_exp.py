@@ -53,13 +53,14 @@ CSV_PREFIX = 'results'
 
 class WavetankExperiment(object):
 
-    def __init__(self, name, offset_yaw, offset_north=0, offset_east=0, suffix='last', **kwargs):
+    def __init__(self, name, offset_yaw, suffix='last', **kwargs):
         self.name = name
 
         # flags
         self.wait = True
-        self.path = kwargs['path']
+        self.path_file = kwargs['path']
         self.path_points = list()
+        self.path_mode = kwargs.get('mode', 'lines')
 
         self.cnt = 0
         self.duration = 0
@@ -68,7 +69,6 @@ class WavetankExperiment(object):
         self.energy_last = 0
 
         # status
-        self.mode = kwargs.get('mode', 'lines')
         self.time_started = 0
         self.experiment_running = False
 
@@ -77,11 +77,7 @@ class WavetankExperiment(object):
         self.csv_file = os.path.join(os.getcwd(), self.csv_file)
 
         self.header = [
-            'time', 'theta',
-            'Ax', 'Ay', 'Az', 'Ak', 'Am', 'An',
-            'Bx', 'By', 'Bz', 'Bk', 'Bm', 'Bn',
-            'duration',
-            'energy_used'
+            'time', 'theta', 'path', 'mode', 'duration', 'energy_used'
         ]
 
         # change sign to switch from marine to maths angle direction convention
@@ -153,15 +149,11 @@ class WavetankExperiment(object):
         with open(self.csv_file, 'a') as exp_file:
             writer = csv.writer(exp_file, delimiter=',')
 
-            # for easier to string conversion
-            point_a = list(self.points[0])
-            point_b = list(self.points[1])
-
             row = list()
             row.append(self.time_started)
             row.append(self.theta)
-            row.extend(point_a)
-            row.extend(point_b)
+            row.append(self.path_file)
+            row.append(self.path_mode)
             row.append(self.duration)
             row.append(self.energy_used)
 
@@ -174,58 +166,50 @@ class WavetankExperiment(object):
         # check data file
         self.check_export()
 
-        # reset the path controller
-        try:
-            self.srv_path.call(command='reset')
-        except Exception:
-            rospy.logerr('%s unable to communicate with path service ...')
-
+        # calculate offsets and points
+        rot_matrix = np.eye(6)
+        rot_matrix[0,0] = np.cos(self.theta)
+        rot_matrix[0,1] = -np.sin(self.theta)
+        rot_matrix[1,0] = np.sin(self.theta)
+        rot_matrix[1,1] = np.cos(self.theta)
 
         # load path
         try:
-            with open(self.path, 'rt') as f:
+            with open(self.path_file, 'rt') as f:
                 path_dict = json.loads(f.read())
 
                 for point in path_dict['points']:
+                    # apply rotation
+                    rot_point = np.dot(rot_matrix, point)
+
+                    # add point to the list
                     self.path_points.append(
-                        Vector6(point)
+                        Vector6(rot_point)
                     )
 
             rospy.loginfo('%s: loaded %s points ...', self.name, len(self.path_points))
 
-        except Exception as e:
-            rospy.logfatal('%s: error %s', self.name, e)
+        except Exception:
+            tb = traceback.format_exc()
+            rospy.logfatal('%s: caught exception:\n%s', self.name, tb)
             sys.exit(-1)
 
-        # calculate offsets and points
-        rot_matrix = np.array([
-            [np.cos(self.theta), -np.sin(self.theta)],
-            [np.sin(self.theta), np.cos(self.theta)]
-        ])
-        xy_A = np.array([OFFSET_A_NORTH, OFFSET_A_EAST])
-        xy_A = np.dot(xy_A, rot_matrix)
-        xy_B = np.array([OFFSET_B_NORTH, OFFSET_B_EAST])
-        xy_B = np.dot(xy_B, rot_matrix)
-
-        self.points = np.array([
-            [xy_A[0], xy_A[1], DEPTH, 0, 0, 0],
-            [xy_B[0], xy_B[1], DEPTH, 0, 0, 0]
-        ])
-
-        self.points[:, 0] += X_OFFSET
-        self.points[:, 1] += Y_OFFSET
+        # reset the path controller
+        try:
+            self.srv_path.call(command='reset')
+        except Exception:
+            rospy.logerr('%s unable to communicate with path service ...', self.name)
 
         # reach initial point
         rospy.loginfo('%s: reaching initial point ...', self.name)
 
         path_initial = [
-            # HWU wavetank
-            Vector6(self.points[0])
+            self.path_points[0]
         ]
         options = [
-            # HWU wavetank
             KeyValue('mode', 'simple'),
-            KeyValue('timeout', '10000')
+            KeyValue('timeout', '1000'),
+            KeyValue('target_speed', '0.4')
         ]
 
         try:
@@ -234,7 +218,8 @@ class WavetankExperiment(object):
             self.srv_path.call(command='start')
         except Exception:
             self.wait = False
-            rospy.logerr('%s unable to communicate with path service ...')
+            rospy.logerr('%s unable to communicate with path service ...', self.name)
+            sys.exit(-1)
 
 
         while self.wait:
@@ -249,21 +234,11 @@ class WavetankExperiment(object):
         # experiment
         rospy.loginfo('%s: starting experiment ...', self.name)
 
-
-        # self.path_points = [
-        #     # HWU wavetank
-        #     Vector6([1.0, -1.8, DEPTH, 0, 0, 0.0]),
-        #     Vector6([4.4, -9.8, DEPTH, 0, 0, 0.0]),
-        #     Vector6([1.0, -9.8, DEPTH, 0, 0, 3.14]),
-        #     Vector6([4.4, -1.8, DEPTH, 0, 0, 0.0]),
-        #     Vector6([1.0, -1.8, DEPTH, 0, 0, 3.14]),
-        # ]
         self.options = [
-            KeyValue('mode', self.mode),
+            KeyValue('mode', self.path_mode),
             KeyValue('timeout', '1000'),
             KeyValue('target_speed', '0.4')
         ]
-
 
         try:
             self.experiment_running = True
@@ -272,7 +247,7 @@ class WavetankExperiment(object):
             self.t_expire = time.time() + 1000
             self.t_last = time.time()
 
-            rospy.loginfo('%s: requesting path (mode: %s) ...', self.name, self.mode)
+            rospy.loginfo('%s: requesting path (mode: %s) ...', self.name, self.path_mode)
             self.srv_path.call(command='path', points=self.path_points, options=self.options)
             self.srv_path.call(command='start')
 
@@ -343,11 +318,10 @@ if __name__ == '__main__':
         sys.exit(-1)
 
     if not os.path.exists(args.path):
-        rospy.logfatal('%s: file %s does not exists!', self.name, args.path)
+        rospy.logfatal('%s: file %s does not exists!', name, args.path)
         sys.exit(-1) 
 
     # run the experiment
-    # offset_north=off_n, offset_east=off_e,
     we = WavetankExperiment(name, offset_yaw=off_yaw, suffix=suffix, mode=args.mode, path=args.path)
 
     try:
