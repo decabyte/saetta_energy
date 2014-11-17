@@ -129,7 +129,8 @@ class ThrustersMonitor(object):
         # calculate the energy for model (using the last two samples)
         #self.model_energy[0:6] += np.trapz(self.model_current[:, -2:], dx=SAMPLE_TIME) * NOMINAL_VOLTAGE
 
-        # compensate for time delays (warning)
+        # TODO: fix this with a proper window of N samples (10 samples is fine but we need to change the thresholds in the pilot)
+        # compensate for time delays
         self.diag_metric = np.trapz(self.model_current[:, 0:-2] - self.real_current[:, 1:-1], dx=SAMPLE_TIME)
 
         # # data fusion (using kalman filter)
