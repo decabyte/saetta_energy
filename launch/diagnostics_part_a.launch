@@ -1,0 +1,74 @@
+<launch>
+    <!-- see thruster_diagnostics.launch for launch examples -->
+
+    <!-- make sure of starting with a clean state -->
+    <rosparam command="delete" param="/pilot"/>
+
+
+    <!-- revert to simulation if SIMULATION is set -->
+    <group if="$(optenv SIMULATION 0)">
+        <!-- load the simulation model -->
+        <rosparam command="load" file="$(find vehicle_core)/conf/simulation_model.yaml"/>
+
+        <!-- load configuration for model-free sim ops -->
+        <group unless="$(optenv MODEL 0)">
+            <rosparam unless="$(optenv AUTO 0)" command="load" file="$(find vehicle_core)/conf/pid_sim.yaml"/>
+            <rosparam if="$(optenv AUTO 0)" command="load" file="$(find vehicle_core)/conf/auto_sim.yaml"/>
+        </group>
+
+        <!-- load configuration for model-based sim ops -->
+        <group if="$(optenv MODEL 0)">
+            <rosparam unless="$(optenv AUTO 0)" command="load" file="$(find vehicle_core)/conf/pid_sim_model.yaml"/>
+            <rosparam if="$(optenv AUTO 0)" command="load" file="$(find vehicle_core)/conf/auto_sim_model.yaml"/>
+        </group>
+    </group>
+
+
+    <!-- revert to real if SIMULATION is not set -->
+    <group unless="$(optenv SIMULATION 0)">
+        <!-- start the thruster driver -->
+        <include file="$(find thrusters_controller)/launch/driver.launch"/>
+
+        <!-- load vehicle model -->
+        <rosparam command="load" file="$(find vehicle_core)/conf/vehicle_model.yaml"/>
+
+        <!-- load configuration for model-free real ops -->
+        <group unless="$(optenv MODEL 0)">
+            <rosparam unless="$(optenv AUTO 0)" command="load" file="$(find vehicle_core)/conf/pid_real.yaml"/>
+            <rosparam if="$(optenv AUTO 0)" command="load" file="$(find vehicle_core)/conf/auto_real.yaml"/>
+        </group>
+
+        <!-- load configuration for model-based real ops -->
+        <group if="$(optenv MODEL 0)">
+            <rosparam unless="$(optenv AUTO 0)" command="load" file="$(find vehicle_core)/conf/pid_real_model.yaml"/>
+            <rosparam if="$(optenv AUTO 0)" command="load" file="$(find vehicle_core)/conf/auto_real_model.yaml"/>
+        </group>
+    </group>
+
+
+    <!-- script config logic -->
+    <arg name="fault_control" default="false"/>
+    <arg name="fault_speeds" default="false"/>
+
+    <!-- <param name="pilot/adaptive_yaw" value="false"/> -->
+    <param name="pilot/fault_control" value="$(arg fault_control)"/>
+    <param name="pilot/fault_speeds" value="$(arg fault_speeds)"/>
+
+
+    <!-- start the vehicle controller -->
+    <node name="vehicle_pilot" pkg="vehicle_core" type="node_pilot.py" args="-v" output="screen">
+        <!-- redirect output -->
+        <param name="topic_output" value="thrusters/request"/>
+    </node>
+
+    <!-- start the thruster wrapper -->
+    <node name="thruster_wrapper" pkg="saetta_energy" type="node_thruster_wrapper.py" output="screen">
+        <!-- set topics input and outputs -->
+        <param name="req_input" value="thrusters/request"/>
+        <param name="req_output" value="thrusters/commands"/>
+
+        <param name="feed_input" value="thrusters/status"/>
+        <param name="feed_output" value="thrusters/feedback"/>
+    </node>
+
+</launch>

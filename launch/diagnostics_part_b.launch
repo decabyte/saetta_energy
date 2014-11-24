@@ -1,4 +1,5 @@
 <launch>
+    <!-- see thruster_diagnostics.launch for launch examples -->
 
     <!-- load the config and start the thrusters model (this is used for diagnostics) -->
     <rosparam command="load" file="$(find vehicle_core)/conf/thruster_model.yaml"/>
@@ -9,13 +10,13 @@
         <param name="topic_input_req" value="thrusters/request"/>
         <param name="topic_input_real" value="thrusters/feedback"/>
 
-        <param name="sample_window" value="20" type="int"/>
+        <param name="samples_current" value="12" type="int"/>
     </node>
 
     <!-- start the path controller -->
     <node name="path_controller" pkg="vehicle_core" type="node_path.py" output="screen"/>
 
     <!-- run also energy system -->
-    <include file="$(find saetta_energy)/launch/standalone.launch"/>
+    <include file="$(find saetta_energy)/launch/energy_monitor.launch"/>
 
 </launch>

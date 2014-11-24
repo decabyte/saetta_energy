@@ -1,6 +1,6 @@
 <launch>
 
-    <!--&lt;!&ndash; start SAETTA system using platform simulator &ndash;&gt;-->
+    <!-- start SAETTA system using platform simulator -->
     <!--<node name="saetta_simulator" pkg="saetta_energy" type="simulator.py" output="screen"/>-->
     <!--<node name="action_tracker" pkg="saetta_energy" type="tracker.py" output="screen"/>-->
 
