@@ -40,11 +40,11 @@ class ThrusterWrapper(object):
         self.th_max = np.ones(6) * 100
 
         # ros interface
-        self.sub_request = rospy.Subscriber(self.req_input, ThrusterCommand, self.handle_input, tcp_nodelay=True, queue_size=3)
-        self.sub_feedback = rospy.Subscriber(self.feed_input, ThrusterFeedback, self.handle_feedback, tcp_nodelay=True, queue_size=3)
+        self.sub_request = rospy.Subscriber(self.req_input, ThrusterCommand, self.handle_input, tcp_nodelay=True, queue_size=10)
+        self.sub_feedback = rospy.Subscriber(self.feed_input, ThrusterFeedback, self.handle_feedback, tcp_nodelay=True, queue_size=10)
 
-        self.pub_request = rospy.Publisher(self.req_output, ThrusterCommand, tcp_nodelay=True, queue_size=3)
-        self.pub_feedback = rospy.Publisher(self.feed_output, ThrusterFeedback, tcp_nodelay=True, queue_size=3)
+        self.pub_request = rospy.Publisher(self.req_output, ThrusterCommand, tcp_nodelay=True, queue_size=10)
+        self.pub_feedback = rospy.Publisher(self.feed_output, ThrusterFeedback, tcp_nodelay=True, queue_size=10)
 
         self.srv_fault = rospy.Service(SRV_FAULT, DictionaryService, self.handle_fault)
 

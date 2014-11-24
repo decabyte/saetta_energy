@@ -52,7 +52,7 @@ class ThrustersMonitor(object):
         self.last_throttle = np.zeros(6)
         self.predicted_throttle = np.zeros(6)
 
-        #self.limit_rate = bool(kwargs.get('limit_rate', False))
+        self.limit_rate = bool(kwargs.get('limit_rate', False))
         self.model_delay = int(kwargs.get('model_delay', 0))
         self.rising_limit = float(kwargs.get('rising_limit', tc.THROTTLE_RISING_LIMIT))
         self.falling_limit = float(kwargs.get('falling_limit', tc.THROTTLE_FALLING_LIMIT))
@@ -73,12 +73,12 @@ class ThrustersMonitor(object):
         # self.data = np.zeros((3, 100))
 
         # subscribers
-        self.sub_req = rospy.Subscriber(topic_input_req, ThrusterCommand, self.handle_req, tcp_nodelay=True, queue_size=3)
-        self.sub_status = rospy.Subscriber(topic_input_real, ThrusterFeedback, self.handle_status, tcp_nodelay=True, queue_size=3)
+        self.sub_req = rospy.Subscriber(topic_input_req, ThrusterCommand, self.handle_req, tcp_nodelay=True, queue_size=10)
+        self.sub_status = rospy.Subscriber(topic_input_real, ThrusterFeedback, self.handle_status, tcp_nodelay=True, queue_size=10)
 
         # publishers
-        self.pub_model = rospy.Publisher(TOPIC_MODEL, ThrusterFeedback, tcp_nodelay=True, queue_size=3)
-        self.pub_diag = rospy.Publisher(TOPIC_DIAG, FloatArrayStamped, tcp_nodelay=True, queue_size=3)
+        self.pub_model = rospy.Publisher(TOPIC_MODEL, ThrusterFeedback, tcp_nodelay=True, queue_size=10)
+        self.pub_diag = rospy.Publisher(TOPIC_DIAG, FloatArrayStamped, tcp_nodelay=True, queue_size=10)
 
 
     def send_diagnostics(self):
@@ -95,24 +95,11 @@ class ThrustersMonitor(object):
         self.pub_model.publish(msg)
 
 
-    # exponential smoothing
-    def weighted_moving_average(data, weights):
-        s = np.zeros(data.shape[1])
-
-        if data.ndim == 2:
-            for n in xrange(data.shape[1]):
-                s[:, n] = np.convolve(data[:,n], w, 'same')
-        else:
-            s = np.convolve(data, w, 'same')
-
-        return s
-
-
     def run(self):
         while not rospy.is_shutdown():
             # predict throttle
             self.predicted_throttle = th.predict_throttle(
-                self.throttle_request, tc.LPF[0], tc.LPF[1], self.model_delay, tc.MAX_THROTTLE
+                self.throttle_request, b=tc.LPF[0], a=tc.LPF[1], offset=self.model_delay, limit=tc.MAX_THROTTLE
             )
 
             # shift input buffer and zero the new entry (in case no further messages are sent from the controller)
