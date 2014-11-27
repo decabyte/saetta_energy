@@ -33,6 +33,10 @@ SAMPLE_TIME = 0.1           # secs
 NOMINAL_VOLTAGE = 28.0      # assumed constant
 
 
+# References:
+#   [1]: http://wiki.ros.org/rospy/Overview/Publishers%20and%20Subscribers
+
+
 class ThrustersMonitor(object):
     def __init__(self, name, topic_input_req, topic_input_real, win_curr, **kwargs):
         self.name = name
