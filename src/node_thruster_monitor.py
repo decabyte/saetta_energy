@@ -62,20 +62,6 @@ class ThrustersMonitor(object):
         self.falling_limit = float(kwargs.get('falling_limit', tc.THROTTLE_FALLING_LIMIT))
 
 
-        # # kalman filter
-        # self.n_state = 1
-        # self.n_observation = 2
-        #
-        # self.kf = kalman.KalmanFilter(self.n_state, self.n_observation)
-        # self.kf.H[0,0] = 1    # measurement matrix should have ones in order to use all the sensors
-        # self.kf.H[1,0] = 1
-        # self.kf.Q[0,0] = 1000.0
-        # self.kf.R[0,0] = 1.0
-        # self.kf.R[1,1] = 1.0
-        #
-        # self.n = 0
-        # self.data = np.zeros((3, 100))
-
         # subscribers
         self.sub_req = rospy.Subscriber(topic_input_req, ThrusterCommand, self.handle_req, tcp_nodelay=True, queue_size=10)
         self.sub_status = rospy.Subscriber(topic_input_real, ThrusterFeedback, self.handle_status, tcp_nodelay=True, queue_size=10)
@@ -146,41 +132,6 @@ class ThrustersMonitor(object):
 
             self.rate.sleep()
 
-            ## data fusion (using kalman filter)
-            # measurements = np.array([
-            #     # self.real_current[0, -1],
-            #     # self.model_current[0, -1],
-            #
-            #     self.model_current[0, -1],
-            #     self.real_current[0, -1]
-            # ])
-            # mean, cov = self.kf.update(measurements)
-            #
-            # print('mean: %s' % mean)
-            # print('cov: %s' % cov)
-            #
-            # # store data
-            # self.data[0, self.n] = self.model_current[0, -1]
-            # self.data[1, self.n] = self.real_current[0, -1]
-            # self.data[2, self.n] = mean
-            #
-            # self.n += 1
-            #
-            # if self.n >= self.data.shape[1]:
-            #     print('kf plot')
-            #
-            #     import matplotlib.pyplot as plt
-            #
-            #     t = np.linspace(0, 10, self.data.shape[1])
-            #
-            #     plt.figure()
-            #     plt.plot(t, self.data[0,:], 'b--', label='sensor #1')
-            #     plt.plot(t, self.data[1,:], 'g--', label='sensor #2')
-            #     plt.plot(t, self.data[2,:], 'r', label='fusion')
-            #     plt.legend()
-            #     plt.show()
-            #
-            #     rospy.signal_shutdown('kf end')
 
     def handle_req(self, data):
         # parse input request
