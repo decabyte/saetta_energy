@@ -5,7 +5,6 @@
 ; generated on: {{ time }}
 
 (define (problem {{ problem_name }})
-
 	; reference the domain domain
 	(:domain {{ domain_name }})
 
@@ -14,28 +13,15 @@
     {% for obj_label, obj_type in objects %}
         {{ obj_label }} - {{ obj_type }}
     {% endfor %}
-
-        wp0 - waypoint
-		wp1 - waypoint
-		wp2 - waypoint
-		wp3 - waypoint
-		wp4 - waypoint
 	)
-
-    {#  literal value expansion  #}
-    {% macro literal_exp(name, values) %}
-        ({{ name }} {{ ' '.join(values) }})
-    {% endmacro %}
-
 
     ; define the initial planning state
 	(:init
     {% for name, values in init_literals %}
-        {{ literal_exp(name, values) }}
+        ({{ name }} {{ ' '.join(values) }})
     {% endfor %}
-
     {% for function, number in init_fluents %}
-        (= {{ literal_exp(function[0], function[1]) }} {{ number }})
+        (= ({{ function[0] }} {{ ' '.join(function[1]) }}) {{ number }})
     {% endfor %}
     )
 
@@ -43,11 +29,11 @@
 	(:goal
 		(and
         {% for name, values in goals %}
-            {{ literal_exp(name, values) }}
+            ({{ name }} {{ ' '.join(values) }})
         {% endfor %}
             ()
  		)
 	)
 
-	(:metric minimize (total-time))
+	(:metric minimize (energy-usage auv))
 )

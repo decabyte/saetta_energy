@@ -31,14 +31,14 @@
     ; define the fluents
 	(:functions
 		(distance ?a ?b - waypoint)
-		(energy-level ?v - vehicle)
+		(energy-usage ?v - vehicle)
 		(energy-required ?a ?b - waypoint)
 	)
 
     ; define the actions
 	(:durative-action move
 		:parameters (?from ?to - waypoint ?v - vehicle)
-		:duration (= ?duration (* 1 (distance ?from ?to)))
+		:duration (= ?duration (* 3.3 (distance ?from ?to)))
 		:condition (and
 			(at start (at ?v ?from))
 			(at start (connected ?from ?to))
@@ -46,7 +46,7 @@
 		:effect (and
 			(at start (not (at ?v ?from))) 
 			(at end (at ?v ?to))
-			(decrease (energy-level ?v) (* #t (energy-required ?from ?to)))
+			(increase (energy-usage ?v) (* #t (energy-required ?from ?to)))
 		)
 	)
 )
