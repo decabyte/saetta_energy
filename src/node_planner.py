@@ -15,6 +15,7 @@ import jinja2 as jin
 # roslib.load_manifest('saetta_energy')
 
 # config
+BIN_PLANNER = 'optic-clp'
 DIR_DATA = '../data'
 DIR_BIN = '../bin'
 
@@ -71,11 +72,16 @@ def main():
         f.write(tmpl_problem.render(**dict_problem))
 
     # call the planner
-    bin_planner = os.path.join(DIR_BIN, 'optic-clp')
+    bin_planner = os.path.join(DIR_BIN, BIN_PLANNER)
     out_plan = os.path.join(DIR_DATA, 'plan.txt')
 
-    result = subprocess.check_output([bin_planner, res_domain, res_problem, out_plan])
+    try:
+        result = subprocess.check_output([bin_planner, res_domain, res_problem, out_plan])
+    except subprocess.CalledProcessError:
+        result = None
+        print(traceback.format_exc())
 
+    # display the results
     print(result)
 
 
