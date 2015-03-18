@@ -73,21 +73,25 @@ def main():
     }
     # TODO: add more data to the problem dicts
 
-    # generate the domain and problem files
+    # generate the domain file
     with open(spec_domain, 'rt') as f:
         s_domain = f.read()
 
-    with open(spec_problem, 'rt') as f:
-        s_problem = f.read()
-
-    tmpl_domain = jin.Template(s_domain, trim_blocks=True, lstrip_blocks=True)
-    tmpl_problem = jin.Template(s_problem, trim_blocks=True, lstrip_blocks=True)
+    tmpl_domain = jin.Template(s_domain)
 
     with open(res_domain, 'wt') as f:
         f.write(tmpl_domain.render(**dict_domain))
 
+
+    # generate the problem file
+    with open(spec_problem, 'rt') as f:
+        s_problem = f.read()
+
+    tmpl_problem = jin.Template(s_problem)
+
     with open(res_problem, 'wt') as f:
         f.write(tmpl_problem.render(**dict_problem))
+
 
     # call the planner
     bin_planner = os.path.join(DIR_BIN, BIN_PLANNER)
