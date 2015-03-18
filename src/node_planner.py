@@ -37,6 +37,7 @@ def main():
     }
 
     # problem variables
+    # TODO: add more data to the problem dicts
     dict_problem = {
         'time': time_gen,
         'problem_name': 'test',
@@ -71,7 +72,6 @@ def main():
             ['at', ['auv', 'wp4']]
         ]
     }
-    # TODO: add more data to the problem dicts
 
     # generate the domain file
     with open(spec_domain, 'rt') as f:
