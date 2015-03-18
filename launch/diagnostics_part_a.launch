@@ -1,13 +1,13 @@
 <launch>
     <!-- see thruster_diagnostics.launch for launch examples -->
 
-    <!-- make sure of starting with a clean state -->
-    <rosparam command="delete" param="/pilot"/>
-
     <!-- default args -->
     <arg name="verbose" default="" />
     <arg name="simulation" default="false" />
     <arg name="topic_output" default="thrusters/request" />
+
+    <!-- make sure of starting with a clean state -->
+    <rosparam command="delete" param="/pilot"/>
 
     <!-- script config logic -->
     <arg name="fault_control" default="false"/>
