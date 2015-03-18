@@ -2,7 +2,7 @@
 
     <!--
         run examples:
-        SIMULATION=1 roslaunch vehicle_diagnostics thruster_diagnostics.launch fault_control:=true fault_speeds:=true
+        roslaunch vehicle_diagnostics thruster_diagnostics.launch simulation:=true fault_control:=true fault_speeds:=true
         MODEL=1 AUTO=1 roslaunch vehicle_diagnostics thruster_diagnostics.launch
     -->
 
