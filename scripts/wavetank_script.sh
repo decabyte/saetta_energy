@@ -11,7 +11,6 @@ sleep 1
 ## REFERENCE RUNS ##
 bash fault_clear.sh
 rosservice call /pilot/fault_control "request: false"
-rosservice call /pilot/fault_speeds "request: false"
 
 for i in {1..5}
 do
@@ -25,7 +24,6 @@ sleep 1
 ## FAULTY RUNS ##
 bash fault_inject.sh 30 100
 rosservice call /pilot/fault_control "request: false"
-rosservice call /pilot/fault_speeds "request: false"
 
 for i in {1..5}
 do
@@ -39,7 +37,6 @@ sleep 1
 ## FAULT CONTROL RUNS ##
 bash fault_inject.sh 30 100
 rosservice call /pilot/fault_control "request: true"
-rosservice call /pilot/fault_speeds "request: false"
 
 for i in {1..5}
 do
@@ -57,7 +54,6 @@ sleep 1
 ## ADAPT CONTROL RUNS ##
 bash fault_inject.sh 30 100
 rosservice call /pilot/fault_control "request: true"
-rosservice call /pilot/fault_speeds "request: true"
 
 for i in {1..5}
 do
@@ -75,7 +71,6 @@ sleep 1
 # final reset
 bash fault_clear.sh
 rosservice call /pilot/fault_speeds "request: false"
-rosservice call /pilot/fault_control "request: false"
 
 # send kill signal to all children
 kill 0

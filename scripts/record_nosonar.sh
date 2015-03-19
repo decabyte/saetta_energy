@@ -1,6 +1,5 @@
 #!/bin/bash
 
-
 # options
 BAGS_OPTS="-a -x \"/bvt(.*)\""
 

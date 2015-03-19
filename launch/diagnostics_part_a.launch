@@ -9,6 +9,8 @@
 
     <!-- make sure of starting with a clean state -->
     <rosparam command="delete" param="/pilot"/>
+    <rosparam command="delete" param="/saetta/diagnostics"/>
+    <rosparam command="load" file="$(find saetta_energy)/conf/diagnostics_conf.yaml"/>
 
     <!-- start the vehicle pilot -->
     <group if="$(arg simulation)">

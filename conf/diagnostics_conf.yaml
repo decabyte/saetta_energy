@@ -1,0 +1,15 @@
+# diagnostics_conf.yaml
+#
+# this is the config file for the node thruster monitor and it can be used to tune the behaviour of the
+# fault mitigation system implemented in the vehicle_core pilot node (thru. the use of dedicated topics)
+saetta:
+  diagnostics:
+    # diagnostic metric threshold
+    threshold_metric: [25.0, 25.0, 25.0, 25.0, 25.0, 25.0]
+
+    # thruster efficiency lowest values before thruster removal
+    exclusion_efficiency: [0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
+
+    # tracking algorithm coefficients
+    coeff_adj_dec: 0.01
+    coeff_adj_inc: 0.00001
