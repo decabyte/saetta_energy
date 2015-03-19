@@ -48,6 +48,7 @@ MAX_SPEED = np.array([2.0, 1.0, 1.0, 0.0, 3.0, 3.0])                # default ma
 # References:
 #   [1]: http://wiki.ros.org/rospy/Overview/Publishers%20and%20Subscribers
 
+# TODO: add a reload configuration service to this node
 
 class ThrustersMonitor(object):
     def __init__(self, name, topic_input_req, topic_input_real, win_curr, **kwargs):
@@ -217,6 +218,7 @@ class ThrustersMonitor(object):
         self.thruster_efficiency = np.clip(self.thruster_efficiency, 0.0, 1.0)      # prevent negative values
 
         # check if is better to exclude inefficient thrusters
+        # TODO: this is locking a broken thruster (is that the behaviour we want?)
         if np.any(self.thruster_efficiency <= self.exclusion_efficiency):
             idx_disable = np.where(self.thruster_efficiency <= self.exclusion_efficiency)[0]
             self.thruster_efficiency[idx_disable] = 0
