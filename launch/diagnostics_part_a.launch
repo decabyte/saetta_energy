@@ -5,17 +5,10 @@
     <arg name="verbose" default="" />
     <arg name="simulation" default="false" />
     <arg name="topic_output" default="thrusters/request" />
+    <arg name="fault_control" default="false"/>
 
     <!-- make sure of starting with a clean state -->
     <rosparam command="delete" param="/pilot"/>
-
-    <!-- script config logic -->
-    <arg name="fault_control" default="false"/>
-    <arg name="fault_speeds" default="false"/>
-
-    <!-- <param name="pilot/adaptive_yaw" value="false"/> -->
-    <param name="pilot/fault_control" value="$(arg fault_control)"/>
-    <param name="pilot/fault_speeds" value="$(arg fault_speeds)"/>
 
     <!-- start the vehicle pilot -->
     <group if="$(arg simulation)">
@@ -31,6 +24,9 @@
             <arg name="topic_output" default="$(arg topic_output)" />
         </include>
     </group>
+
+    <!-- fault control flag (this will override what loaded by the pilot) -->
+    <param name="pilot/fault_control" value="$(arg fault_control)"/>
 
     <!-- start the thruster wrapper -->
     <node name="thruster_wrapper" pkg="vehicle_core" type="node_thruster_wrapper.py" output="screen">
