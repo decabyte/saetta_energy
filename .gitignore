@@ -13,15 +13,15 @@
 */.idea
 
 # Build related #
-**/CMakeFiles
-**/CMakeCache.txt
-**/cmake_install.cmake
-**/Makefile
-**/bin
-**/build
-**/lib
-**/msg_gen
-**/srv_gen
+CMakeFiles
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+bin
+build
+lib
+msg_gen
+srv_gen
 ROS_NOBUILD
 
 # ROS generated
