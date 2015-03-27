@@ -5,7 +5,7 @@
 saetta:
   diagnostics:
     # diagnostic metric threshold
-    threshold_metric: [25.0, 25.0, 25.0, 25.0, 25.0, 25.0]
+    threshold_metric: [20.0, 20.0, 20.0, 20.0, 20.0, 20.0]
 
     # thruster efficiency lowest values before thruster removal
     exclusion_efficiency: [0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
