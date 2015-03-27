@@ -1,0 +1,18 @@
+<launch>
+    <!-- see thruster_diagnostics.launch for launch examples -->
+
+    <!-- load the config and start the thrusters model (this is used for diagnostics) -->
+    <rosparam command="delete" param="/saetta/diagnostics"/>
+    <rosparam command="load" file="$(find saetta_energy)/conf/diagnostics_conf.yaml"/>
+    <rosparam command="load" file="$(find vehicle_core)/conf/thruster_model.yaml"/>
+
+    <!-- start the thruster diagnostic node -->
+    <node name="thrusters_monitor" pkg="saetta_energy" type="node_thruster_monitor.py" output="screen">
+        <!-- set topics input and outputs -->
+        <param name="topic_input_req" value="thrusters/request"/>
+        <param name="topic_input_real" value="thrusters/feedback"/>
+
+        <param name="samples_current" value="12" type="int"/>
+    </node>
+
+</launch>

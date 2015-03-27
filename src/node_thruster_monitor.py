@@ -53,14 +53,6 @@ class ThrustersMonitor(object):
         self.name = name
         self.rate = rospy.Rate(RATE_MONITOR)
 
-        # config
-        config_model = rospy.get_param('thruster_model', dict())
-
-        self.limit_rate = bool(config_model.get('limit_rate', False))
-        self.model_delay = int(config_model.get('model_delay', 0))
-        self.rising_limit = float(config_model.get('rising_limit', tc.THROTTLE_RISING_LIMIT))
-        self.falling_limit = float(config_model.get('falling_limit', tc.THROTTLE_FALLING_LIMIT))
-
         # thrust allocation
         self.local_TAM = np.copy(tc.TAM)
         self.local_inv_TAM = np.copy(tc.inv_TAM)
@@ -68,15 +60,24 @@ class ThrustersMonitor(object):
         self.max_forces = np.copy(tc.MAX_U)
         self.max_forces[self.max_forces <= 0.0] = 1000.0        # remove zeros (avoid illegal division)
 
-        # load config
+
+        # config
+        config_model = rospy.get_param('thruster_model', dict())
         diag_config = rospy.get_param('saetta/diagnostics', dict())
         pilot_config = rospy.get_param('pilot', dict())
+
+        # load config
+        self.limit_rate = bool(config_model.get('limit_rate', False))
+        self.model_delay = int(config_model.get('model_delay', 0))
+        self.rising_limit = float(config_model.get('rising_limit', tc.THROTTLE_RISING_LIMIT))
+        self.falling_limit = float(config_model.get('falling_limit', tc.THROTTLE_FALLING_LIMIT))
 
         self.threshold_metric = np.array(diag_config.get('threshold_metric', THRESH_METRIC.tolist()))
         self.exclusion_efficiency = np.array(diag_config.get('exclusion_efficiency', EXC_EFF.tolist()))
         self.coeff_adj_dec = float(diag_config.get('coeff_adj_dec', COEFF_ADJ_DEC))
         self.coeff_adj_inc = float(diag_config.get('coeff_adj_inc', COEFF_ADJ_INC))
         self.max_speed = np.array(pilot_config.get('max_speed', MAX_SPEED.tolist()))
+
 
         # outputs
         self.diagnostic_metric = np.zeros(6, dtype=np.float64)
@@ -115,6 +116,10 @@ class ThrustersMonitor(object):
 
         # TODO: add a reload configuration service to this node
         #self.t_log = rospy.Timer(rospy.Duration(5.0), self.print_console)
+
+
+    def reload_config(self):
+        pass
 
 
     def send_diagnostics(self, event=None):

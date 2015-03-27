@@ -7,37 +7,14 @@
     <arg name="topic_output" default="thrusters/request" />
     <arg name="fault_control" default="false"/>
 
-    <!-- make sure of starting with a clean state -->
-    <rosparam command="delete" param="/pilot"/>
-    <rosparam command="delete" param="/saetta/diagnostics"/>
-    <rosparam command="load" file="$(find saetta_energy)/conf/diagnostics_conf.yaml"/>
-
-    <!-- start the vehicle pilot -->
-    <group if="$(arg simulation)">
-        <include file="$(find vehicle_core)/launch/pilot_sim.launch">
-            <arg name="verbose" default="$(arg verbose)" />
-            <arg name="topic_output" default="$(arg topic_output)" />
-        </include>
-    </group>
-
-    <group unless="$(arg simulation)">
-        <include file="$(find vehicle_core)/launch/pilot_real.launch">
-            <arg name="verbose" default="$(arg verbose)" />
-            <arg name="topic_output" default="$(arg topic_output)" />
-        </include>
-    </group>
+    <!-- start the wrapper and the pilot -->
+    <include file="$(find vehicle_core)/launch/thruster_wrapper.launch">
+        <arg name="verbose" default="$(arg verbose)" />
+        <arg name="simulation" default="$(arg simulation)" />
+        <arg name="topic_output" default="$(arg topic_output)" />
+    </include>
 
     <!-- fault control flag (this will override what loaded by the pilot) -->
     <param name="pilot/fault_control" value="$(arg fault_control)"/>
-
-    <!-- start the thruster wrapper -->
-    <node name="thruster_wrapper" pkg="vehicle_core" type="node_thruster_wrapper.py" output="screen">
-        <!-- set topics input and outputs -->
-        <param name="req_input" value="thrusters/request"/>
-        <param name="req_output" value="thrusters/commands"/>
-
-        <param name="feed_input" value="thrusters/status"/>
-        <param name="feed_output" value="thrusters/feedback"/>
-    </node>
 
 </launch>
