@@ -8,6 +8,7 @@
 trap "kill 0" SIGINT
 
 # config
+MODE="lines"
 TRJ="../data/wavetank_eight.json"
 
 # utils
@@ -22,8 +23,36 @@ function vehicle_reset() {
 	rosservice call /nav/reset
 }
 
+function recording_start() {
+	# start rosbag record using subshell
+	(rosbag record -a -o "$1_$2") &
+    pid=$!
+
+    # wait a bit to allow the rosbag initialization
+    sleep 1
+
+    return $pid
+}
+
+function recording_stop() {
+	# use rosnode to grab the rosbag record node name
+	nodes=$(rosnode list | grep /record)
+
+	for node in $nodes
+	do
+		echo "terminating node $node ..."
+		rosnode kill $node
+	done
+
+	# send kill signal to all children
+    #kill -INT $PID_BAG
+    
+    # wait a bit to allow the rosbag cleanup
+    sleep 1
+}
+
 # initial cleanup
-#vehicle_reset
+# ...
 
 ## REFERENCE RUNS ##
 for i in {1..5}
@@ -32,28 +61,29 @@ do
     vehicle_reset
 
 	# run config
-	# rosparam set /pilot/fault_control false
+	TAG="ref"
+	rosparam set /pilot/fault_control false
+	rosparam set /pilot/optimal_allocation true
+
 	# rosrun vehicle_core fault_clear.sh
 	# rosservice call /pilot/fault_control "request: false"
 
-    # record the experiment
-    (rosbag record -a -o "ref_${i}") &
-    PID_BAG=$!
-    sleep 1
+    # enable recording
+    recording_start $TAG $i 
 
-    python wavetank_exp.py 0 --mode=lines --path="$TRJ" --output=ref
-    echo "run[$i]: exit code $?"
+    echo "starting ${TAG} navigation experiment"
+    python wavetank_exp.py 0 --mode="$MODE" --path="$TRJ" --output="$TAG"
+    echo "${TAG} run[$i]: exit code $?"
 
-    # send kill signal to all children
-    kill $PID_BAG
-    sleep 1
+    # disable recording
+   	recording_stop
 
     # reset the vehicle state
     vehicle_reset
 done
 
 # final cleanup
-#vehicle_reset
+# ...
 
 kill 0
 exit 0
