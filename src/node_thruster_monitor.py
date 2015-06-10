@@ -15,6 +15,7 @@ from vehicle_core.control import thrust_allocation as ta
 from vehicle_core.config import thrusters_config as tc
 
 from vehicle_interface.msg import ThrusterCommand, ThrusterFeedback, FloatArrayStamped, Vector6Stamped
+from std_srvs.srv import Empty
 
 # constants
 TOPIC_REQ = 'thrusters/commands'
@@ -25,6 +26,8 @@ TOPIC_DIAG = 'thrusters/diagnostics'
 TOPIC_EFF = 'thrusters/efficiency'
 TOPIC_SPD = 'pilot/speeds'
 TOPIC_DOF = 'thrusters/dof'
+
+SRV_RESET = 'thrusters/monitor/reset'
 
 # configs
 RATE_MONITOR = 10           # rate of the diagnostic loop (Hz)
@@ -60,24 +63,8 @@ class ThrustersMonitor(object):
         self.max_forces = np.copy(tc.MAX_U)
         self.max_forces[self.max_forces <= 0.0] = 1000.0        # remove zeros (avoid illegal division)
 
-
-        # config
-        config_model = rospy.get_param('thruster_model', dict())
-        diag_config = rospy.get_param('saetta/diagnostics', dict())
-        pilot_config = rospy.get_param('pilot', dict())
-
-        # load config
-        self.limit_rate = bool(config_model.get('limit_rate', False))
-        self.model_delay = int(config_model.get('model_delay', 0))
-        self.rising_limit = float(config_model.get('rising_limit', tc.THROTTLE_RISING_LIMIT))
-        self.falling_limit = float(config_model.get('falling_limit', tc.THROTTLE_FALLING_LIMIT))
-
-        self.threshold_metric = np.array(diag_config.get('threshold_metric', THRESH_METRIC.tolist()))
-        self.exclusion_efficiency = np.array(diag_config.get('exclusion_efficiency', EXC_EFF.tolist()))
-        self.coeff_adj_dec = float(diag_config.get('coeff_adj_dec', COEFF_ADJ_DEC))
-        self.coeff_adj_inc = float(diag_config.get('coeff_adj_inc', COEFF_ADJ_INC))
-        self.max_speed = np.array(pilot_config.get('max_speed', MAX_SPEED.tolist()))
-
+        # load initial config from rosparam
+        self.load_config()
 
         # outputs
         self.diagnostic_metric = np.zeros(6, dtype=np.float64)
@@ -109,18 +96,46 @@ class ThrustersMonitor(object):
         self.pub_spd = rospy.Publisher(TOPIC_SPD, FloatArrayStamped, tcp_nodelay=True, queue_size=10)
         self.pub_dof = rospy.Publisher(TOPIC_DOF, Vector6Stamped, tcp_nodelay=True, queue_size=10)
 
+        # services
+        self.srv_rst = rospy.Service(SRV_RESET, Empty, self.handle_reset)
+
         # timers
         self.t_mod = rospy.Timer(rospy.Duration(1.0 / RATE_MODEL), self.send_model)
         self.t_pil = rospy.Timer(rospy.Duration(1.0 / RATE_PILOT), self.send_pilot)
         self.t_dia = rospy.Timer(rospy.Duration(1.0 / RATE_DIAG), self.send_diagnostics)
+        # self.t_log = rospy.Timer(rospy.Duration(5.0), self.print_console)
 
-        # TODO: add a reload configuration service to this node
-        #self.t_log = rospy.Timer(rospy.Duration(5.0), self.print_console)
+    def load_config(self):
+        # read config
+        config_model = rospy.get_param('thruster_model', dict())
+        diag_config = rospy.get_param('saetta/diagnostics', dict())
+        pilot_config = rospy.get_param('pilot', dict())
 
+        # set internal state
+        self.limit_rate = bool(config_model.get('limit_rate', False))
+        self.model_delay = int(config_model.get('model_delay', 0))
+        self.rising_limit = float(config_model.get('rising_limit', tc.THROTTLE_RISING_LIMIT))
+        self.falling_limit = float(config_model.get('falling_limit', tc.THROTTLE_FALLING_LIMIT))
 
-    def reload_config(self):
-        pass
+        self.threshold_metric = np.array(diag_config.get('threshold_metric', THRESH_METRIC.tolist()))
+        self.exclusion_efficiency = np.array(diag_config.get('exclusion_efficiency', EXC_EFF.tolist()))
+        self.coeff_adj_dec = float(diag_config.get('coeff_adj_dec', COEFF_ADJ_DEC))
+        self.coeff_adj_inc = float(diag_config.get('coeff_adj_inc', COEFF_ADJ_INC))
+        self.max_speed = np.array(pilot_config.get('max_speed', MAX_SPEED.tolist()))
 
+    def handle_reset(self, req):
+        rospy.logwarn('%s: resetting monitor ...', self.name)
+
+        # reload the configuration
+        self.load_config()
+
+        # reinitilize the outputs
+        self.diagnostic_metric = np.zeros(6, dtype=np.float64)
+        self.thruster_efficiency = np.ones(6, dtype=np.float64)
+        self.pilot_speed = np.ones(6, dtype=np.float64)
+        self.dof_availability = np.ones(6, dtype=np.float64)
+
+        return {}
 
     def send_diagnostics(self, event=None):
         msg = FloatArrayStamped()
@@ -158,7 +173,6 @@ class ThrustersMonitor(object):
         msg.current = self.model_current[:, -1]
         self.pub_model.publish(msg)
 
-
     def handle_req(self, data):
         # parse input request
         self.throttle_request[:, -1] = np.array(data.throttle, dtype=np.float64)
@@ -168,7 +182,6 @@ class ThrustersMonitor(object):
         # parse sensor data
         self.real_current[:, -1] = np.array(data.current, dtype=np.float64)
 
-
     def update_model(self):
         # predict throttle
         self.predicted_throttle = th.predict_throttle(
@@ -177,7 +190,7 @@ class ThrustersMonitor(object):
 
         # shift input buffer and zero the new entry (in case no further messages are sent from the controller)
         self.throttle_request = np.roll(self.throttle_request, -1, axis=1)
-        #self.throttle_request[:, -1] = np.zeros(6)
+        # self.throttle_request[:, -1] = np.zeros(6)
 
         # rate limiter
         self.predicted_throttle = th.rate_limiter(
@@ -192,7 +205,6 @@ class ThrustersMonitor(object):
         self.model_current = np.roll(self.model_current, -1, axis=1)
         self.model_current[:, -1] = tm.estimate_current(self.predicted_throttle, tc.THROTTLE_TO_CURRENT)
 
-
     def update_diagnostics(self):
         # fix ROS delay
         # a, b = 2, self.win_curr
@@ -206,24 +218,23 @@ class ThrustersMonitor(object):
         self.model_energy = np.trapz(self.model_current[:, a:b], dx=SAMPLE_TIME, axis=1) * NOMINAL_VOLTAGE
         self.real_energy = np.trapz(self.real_current[:, c:d], dx=SAMPLE_TIME, axis=1) * NOMINAL_VOLTAGE
 
-        #rospy.loginfo('%s: delta: %s', self.name, self.model_energy - self.real_energy)
+        # rospy.loginfo('%s: delta: %s', self.name, self.model_energy - self.real_energy)
 
         # calculate diagnostic metric (without including delays)
-        self.diagnostic_vector[:,-1] = (self.model_energy - self.real_energy)
+        self.diagnostic_vector[:, -1] = (self.model_energy - self.real_energy)
 
         # exponential moving average filter
         for n in xrange(self.diagnostic_vector.shape[0]):
-            self.diagnostic_metric[n] = np.convolve(self.diagnostic_vector[n,:], self.exp_weights, mode='same')[-1]
+            self.diagnostic_metric[n] = np.convolve(self.diagnostic_vector[n, :], self.exp_weights, mode='same')[-1]
 
         # advance filter
         self.diagnostic_vector = np.roll(self.diagnostic_vector, -1, axis=1)
 
         # shift status buffer and zero the new entry (in case no further messages are sent from the controller)
         self.real_current = np.roll(self.real_current, -1, axis=1)
-        #self.real_current[:, -1] = np.zeros(6)
+        # self.real_current[:, -1] = np.zeros(6)
 
-
-        ### update_efficiency(self):
+        # update_efficiency(self):
         indexes = np.where(self.diagnostic_metric > self.threshold_metric)[0]
 
         # update the efficiency and costs
@@ -238,9 +249,8 @@ class ThrustersMonitor(object):
             idx_disable = np.where(self.thruster_efficiency <= self.exclusion_efficiency)[0]
             self.thruster_efficiency[idx_disable] = 0
 
-
     def update_estimates(self):
-        ### update_speeds(self):
+        # update_speeds(self):
         self.local_inv_TAM = ta.tam_weighted_inverse(self.local_TAM, self.thruster_efficiency)
         self.available_forces = ta.evaluate_max_force(self.local_inv_TAM)
 
@@ -251,7 +261,7 @@ class ThrustersMonitor(object):
 
         self.pilot_speed = np.clip(self.pilot_speed, 0, self.max_speed)
 
-        ### update_dof(self):
+        # update_dof(self):
         ratio_forces = np.clip(self.available_forces / self.max_forces, 0.0, 1.0)
         ratio_tam = np.ones(6)
 
@@ -266,12 +276,10 @@ class ThrustersMonitor(object):
 
         self.dof_availability = np.minimum(ratio_forces, ratio_tam)
 
-
     def run(self):
         while not rospy.is_shutdown():
             self.update_diagnostics()
             self.rate.sleep()
-
 
     def print_console(self, event=None):
         rospy.loginfo('%s: efficiency: %s', self.name, self.thruster_efficiency)

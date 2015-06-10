@@ -2,11 +2,49 @@
 
     <!--
         run examples:
-        roslaunch vehicle_diagnostics thruster_diagnostics.launch simulation:=true fault_control:=true fault_speeds:=true
+        roslaunch vehicle_diagnostics thruster_diagnostics.launch simulation:=true fault_control:=true
         MODEL=1 AUTO=1 roslaunch vehicle_diagnostics thruster_diagnostics.launch
     -->
 
-    <include file="$(find saetta_energy)/launch/diagnostics_part_a.launch"/>
-    <include file="$(find saetta_energy)/launch/diagnostics_part_b.launch"/>
+    <!-- default args -->
+    <arg name="use_gui" default="false" />
+    <arg name="nav_verbose" default="false" />
+    <arg name="pilot_verbose" default="false" />
+    <arg name="simulation" default="true" />
+    <arg name="fault_control" default="false"/>
+    <arg name="topic_output" default="thrusters/request" />
+
+    <!-- simulation includes -->
+    <group if="$(arg simulation)">
+	    <include file="$(find vehicle_core)/launch/nav_sim.launch">
+	        <arg name="verbose" value="$(arg nav_verbose)"/>
+	    </include>
+	</group>
+
+    <!-- start the wrapper and the pilot -->
+    <include file="$(find vehicle_core)/launch/thruster_wrapper.launch">
+        <arg name="verbose" default="$(arg pilot_verbose)" />
+        <arg name="simulation" default="$(arg simulation)" />
+        <arg name="topic_output" default="$(arg topic_output)" />
+    </include>
+
+    <!-- fault control flag (this will override what loaded by the pilot) -->
+    <param name="pilot/fault_control" value="$(arg fault_control)"/>
+
+	<!-- start the path controller -->
+    <include file="$(find vehicle_core)/launch/path_controller.launch"/>
+	
+	<!-- start the thruster diagnostic node and energy monitor -->
+    <include file="$(find saetta_energy)/launch/thruster_monitor.launch"/>
+    <include file="$(find saetta_energy)/launch/energy_monitor.launch"/>
+
+    <!-- rviz -->
+    <group if="$(arg use_gui)">
+        <include file="$(find vehicle_core)/launch/nav_visual.launch"/>
+
+        <node name="rviz_interface" pkg="vehicle_core" type="node_rviz_interface.py" args="" output="screen">
+            <param name="mode" value="path"/>
+        </node>
+    </group>
 
 </launch>
