@@ -8,11 +8,13 @@
 trap "kill 0" SIGINT
 
 # config
-MODE="lines"
-TRJ="../data/wavetank_eight.json"
+MODE="fast"
+TRJ="../data/test_fast.json"
 
 # utils
 function vehicle_reset() {
+    rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [0.0, 0.0, 0.0]"
+
 	rosparam set /pilot/fault_control false
 
 	rosrun vehicle_core fault_clear.sh
@@ -52,18 +54,18 @@ function recording_stop() {
 }
 
 # initial cleanup
-# ...
+vehicle_reset
 
 ## REFERENCE RUNS ##
 for i in {1..5}
 do
-    # reset the vehicle state
-    vehicle_reset
-
 	# run config
-	TAG="ref"
+	TAG="ref_std"
 	rosparam set /pilot/fault_control false
-	rosparam set /pilot/optimal_allocation true
+	rosparam set /pilot/optimal_allocation false
+
+    # adjust water
+	#rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [0.${i}, 0.0, 0.0]"
 
 	# rosrun vehicle_core fault_clear.sh
 	# rosservice call /pilot/fault_control "request: false"
@@ -72,7 +74,35 @@ do
     recording_start $TAG $i 
 
     echo "starting ${TAG} navigation experiment"
-    rosrun vehicle_core path_executor.py 0 --mode="$MODE" --path="$TRJ" --output="$TAG"
+    rosrun vehicle_core path_executor.py 0 --mode="$MODE" --path="$TRJ" --output="$TAG" --label="${TAG}_{$i}"
+    echo "${TAG} run[$i]: exit code $?"
+
+    # disable recording
+   	recording_stop
+
+    # reset the vehicle state
+    vehicle_reset
+done
+
+## REFERENCE OPTIMAL RUNS ##
+for i in {1..5}
+do
+	# run config
+	TAG="ref_opt"
+	rosparam set /pilot/fault_control false
+	rosparam set /pilot/optimal_allocation true
+
+    # adjust water
+	#rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [0.${i}, 0.0, 0.0]"
+
+	# rosrun vehicle_core fault_clear.sh
+	# rosservice call /pilot/fault_control "request: false"
+
+    # enable recording
+    recording_start $TAG $i
+
+    echo "starting ${TAG} navigation experiment"
+    rosrun vehicle_core path_executor.py 0 --mode="$MODE" --path="$TRJ" --output="$TAG" --label="${TAG}_${i}"
     echo "${TAG} run[$i]: exit code $?"
 
     # disable recording
@@ -83,7 +113,7 @@ do
 done
 
 # final cleanup
-# ...
+# vehicle_reset
 
 kill 0
 exit 0
