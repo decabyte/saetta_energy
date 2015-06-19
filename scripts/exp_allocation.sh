@@ -40,6 +40,9 @@ function recording_stop() {
 	# use rosnode to grab the rosbag record node name
 	nodes=$(rosnode list | grep /record)
 
+    # wait a bit to allow the proper flush
+	sleep 1
+
 	for node in $nodes
 	do
 		echo "terminating node $node ..."
@@ -78,6 +81,7 @@ do
     echo "${TAG} run[$i]: exit code $?"
 
     # disable recording
+    sleep 1
    	recording_stop
 
     # reset the vehicle state
@@ -106,6 +110,7 @@ do
     echo "${TAG} run[$i]: exit code $?"
 
     # disable recording
+    sleep 1
    	recording_stop
 
     # reset the vehicle state
