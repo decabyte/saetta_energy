@@ -72,7 +72,7 @@ do
     recording_start $TAG $i 
 
     echo "starting ${TAG} navigation experiment"
-    python wavetank_exp.py 0 --mode="$MODE" --path="$TRJ" --output="$TAG"
+    rosrun vehicle_core path_executor.py 0 --mode="$MODE" --path="$TRJ" --output="$TAG"
     echo "${TAG} run[$i]: exit code $?"
 
     # disable recording
