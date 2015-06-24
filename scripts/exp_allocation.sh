@@ -25,7 +25,7 @@ FAIL_LVL[4]=0           # 0 %
 
 # utils
 function vehicle_reset() {
-    rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [0.0, 0.0, 0.0]"
+    rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [0.0, 0.001]"
 
 	rosparam set /pilot/fault_control false
 
@@ -83,7 +83,7 @@ do
 	rosparam set /pilot/optimal_allocation false
 
     # adjust water
-	#rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [0.${i}, 0.0, 0.0]"
+	#rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [0.${i}, 0.001]"
 
     # reset failure and fault mitigation
 	# rosrun vehicle_core fault_clear.sh
@@ -117,7 +117,7 @@ do
 	rosparam set /pilot/optimal_allocation false
 
     # adjust water
-	#rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [0.${i}, 0.0, 0.0]"
+	#rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [0.${i}, 0.001]"
 
 	# reset failure and fault mitigation
 	rosrun vehicle_core fault_clear.sh
@@ -155,7 +155,7 @@ do
 	rosparam set /pilot/optimal_allocation false
 
     # adjust water
-	#rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [0.${i}, 0.0, 0.0]"
+	#rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [0.${i}, 0.001]"
 
 	# reset failure and fault mitigation
 	rosrun vehicle_core fault_clear.sh
@@ -193,7 +193,7 @@ do
 	rosparam set /pilot/optimal_allocation true
 
     # adjust water
-	#rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [0.${i}, 0.0, 0.0]"
+	#rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [0.${i}, 0.001]"
 
     # reset failure and fault mitigation
 	# rosrun vehicle_core fault_clear.sh
@@ -227,7 +227,7 @@ do
 	rosparam set /pilot/optimal_allocation true
 
     # adjust water
-	#rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [0.${i}, 0.0, 0.0]"
+	#rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [0.${i}, 0.001]"
 
 	# reset failure and fault mitigation
 	rosrun vehicle_core fault_clear.sh
@@ -265,7 +265,7 @@ do
 	rosparam set /pilot/optimal_allocation true
 
     # adjust water
-	#rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [0.${i}, 0.0, 0.0]"
+	#rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [0.${i}, 0.001]"
 
 	# reset failure and fault mitigation
 	rosrun vehicle_core fault_clear.sh
