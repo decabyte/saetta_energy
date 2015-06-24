@@ -1,5 +1,4 @@
 <launch>
-
     <!--
         run examples:
         roslaunch vehicle_diagnostics thruster_diagnostics.launch simulation:=true fault_control:=true

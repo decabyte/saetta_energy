@@ -12,7 +12,6 @@ roslib.load_manifest('saetta_energy')
 from saetta_energy.msg import EnergyReport, EnergyStatus
 from vehicle_interface.msg import ThrusterFeedback
 
-
 # config
 DEFAULT_BAT = 1800.0            # battery pack capacity for Nessie AUV (Wh)
 TS_UPDATE = 1.0                 # sec
@@ -122,7 +121,6 @@ class EnergyMonitor(object):
         self.thrs_energy = np.zeros(6)
         self.sub_thrs = rospy.Subscriber(TOPIC_THRUSTERS, ThrusterFeedback, self.handle_thrusters, queue_size=3)
 
-
     def publish_status(self, event):
         report = EnergyReport()
         report.header.stamp = rospy.Time.now()
@@ -138,9 +136,7 @@ class EnergyMonitor(object):
 
         self.pub_report.publish(report)
 
-
     def update_status(self, event):
-        # old usage
         prev_used = self.status['energy_used']
 
         # reset counters
@@ -166,7 +162,6 @@ class EnergyMonitor(object):
         self.status['energy_left'] = np.sum([ sub['energy_left'] for sub in self.status['subsystems'] ])
         self.status['avg_power'] = ((self.status['energy_used'] - prev_used) / self.ts_update) * 3600
 
-
     def handle_thrusters(self, data):
         self.thrs_current = np.roll(self.thrs_current, -1, axis=1)
         self.thrs_current[:, -1] = np.array(data.current[0:6])
@@ -177,34 +172,26 @@ class EnergyMonitor(object):
         self.thruster['avg_power'] = THR_VNOM * self.thruster['avg_current']
 
 
-
 if __name__ == '__main__':
     rospy.init_node('energy_monitor')
+
     name = rospy.get_name()
     rospy.loginfo('%s initializing ...', name)
 
     # load parameters
-    verbose = False
-    rate_update = float(rospy.get_param('~rate_update', TS_UPDATE))               # sec
-    rate_publish = float(rospy.get_param('~rate_publish', TS_PUBLISH))            # sec
+    ts_update = float(rospy.get_param('~ts_update', TS_UPDATE))               # sec
+    ts_publish = float(rospy.get_param('~ts_publish', TS_PUBLISH))            # sec
     battery_capacity = float(rospy.get_param('~battery_capacity', DEFAULT_BAT))   # battery capacity (watt-hours)
 
     # parse args
-    args = rospy.myargv()
-
-    if '-v' in args:
-        verbose = True
+    #args = rospy.myargv()
 
     # print config
-    rospy.loginfo('%s: rate of update: %s', name, rate_update)
-    rospy.loginfo('%s: rate of report: %s', name, rate_publish)
+    rospy.loginfo('%s: time of update: %s', name, ts_update)
+    rospy.loginfo('%s: time of report: %s', name, ts_publish)
     rospy.loginfo('%s: initial capacity: %s', name, battery_capacity)
 
+    # start the node
+    es = EnergyMonitor(name, battery_capacity, ts_update, ts_publish)
 
-    try:
-        es = EnergyMonitor(name, battery_capacity, rate_update, rate_publish)
-        rospy.spin()
-    except rospy.ROSInterruptException as ri:
-        rospy.logerr('[%s]: caught exception: %s', rospy.get_name(), str(ri))
-    else:
-        rospy.loginfo('[%s]: clean shutdown ...', rospy.get_name())
+    rospy.spin()
