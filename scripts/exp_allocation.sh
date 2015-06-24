@@ -39,7 +39,7 @@ function vehicle_reset() {
 
 function recording_start() {
 	# start rosbag record using subshell
-	(rosbag record -a -o "$1_$2") &
+	(rosbag record -a -O "$1_$2") &
     pid=$!
 
     # wait a bit to allow the rosbag initialization
