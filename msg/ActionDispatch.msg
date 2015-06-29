@@ -27,5 +27,5 @@ uint8 command                                   # command to trigger on an exist
 uint8 feedback                                  # type of feedback (e.g. continuous / one-time)
 string name                                     # fully qualified name of the action (or signal if id = 0)
 
-float64 duration                                # (optional) duration in seconds
+float64 timeout                                 # (optional) expected duration in seconds
 diagnostic_msgs/KeyValue[] params               # (optional) key-value pairs of action parameters (str:str)
