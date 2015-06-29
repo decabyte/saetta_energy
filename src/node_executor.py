@@ -218,9 +218,14 @@ def main():
         'actions': [
             {'type': 'single', 'name': 'goto', 'params': {'pose': [10.0, 20.0, 3.0, 0.0, 0.0, 0.0]}},
             {'type': 'single', 'name': 'goto', 'params': {'pose': [20.0, 10.0, 3.0, 0.0, 0.0, 0.0]}},
-            {'type': 'single', 'name': 'goto', 'params': {'pose': [20.0, 10.0, 3.0, 0.0, 0.0, 0.0]}},
+            {'type': 'single', 'name': 'goto', 'params': {'pose': [20.0, 40.0, 3.0, 0.0, 0.0, 0.0]}},
         ]
     }
+
+    # TODO:
+    #   add loading mission from file
+    #   add trajectory generation
+    #   add mission report save to file
 
     # start the mission
     me = MissionExecutor()
