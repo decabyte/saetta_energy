@@ -5,6 +5,7 @@ from __future__ import division
 import sys
 import os
 import traceback
+import argparse
 import json
 import random
 import string
@@ -98,8 +99,8 @@ class MissionExecutor(object):
         }
 
         # output
-        self.mission_dir = os.path.expanduser('~')
-        self.mission_log = None
+        self.output_dir = kwargs.get('output_dir', os.path.expanduser('~'))
+        self.output_log = None
 
         self.time_start = 0.0
         self.time_end = 0.0
@@ -121,7 +122,7 @@ class MissionExecutor(object):
     def handle_energy(self, data):
         self.energy_last = data.energy_used
 
-    def execute(self, mission):
+    def execute(self, mission, label=None):
         if self.mission is not None:
             rospy.logwarn('%s: executing mission, please abort current execution first ...')
             return
@@ -132,14 +133,20 @@ class MissionExecutor(object):
 
         # store mission data
         self.mission = mission
-        self.label = urlify(self.mission['name'])
 
-        mfile = '{}_{}.csv'.format(self.label, id_generator(6))
-        self.mission_log = os.path.join(self.mission_dir, mfile)
+        if label is None:
+            self.label = urlify(self.mission['name'])
+        else:
+            self.label = label
+
+        output_file = '{}_{}.csv'.format(self.label, id_generator(6))
+        self.output_log = os.path.join(self.output_dir, output_file)
 
         # init output log
-        if not os.path.exists(self.mission_log):
-            with open(self.mission_log, 'wt') as mlog:
+        if not os.path.exists(self.output_log):
+            rospy.loginfo('%s: saving mission output to file (%s)', self.name, self.output_log)
+
+            with open(self.output_log, 'wt') as mlog:
                 mlog.write('name,action,time_start,time_end,time_elapsed,energy_used\n')
 
         # change state
@@ -196,12 +203,15 @@ class MissionExecutor(object):
             poses.append(action['params']['pose'])
             poses.append(action['params']['pose'])
 
-            # dispatch new action
-            # ...
+            # TEMP: mock the action system with path requests
+            self.send_path_request(poses)
+        elif action['name'] == ACT_HOVER:
+            poses = []
+            poses.append(action['params']['pose'])
+            poses.append(action['params']['pose'])
 
             # TEMP: mock the action system with path requests
-            self.path_enabled = True
-            self.send_path_request(poses)
+            self.send_path_request(poses, mode='simple')
         else:
             rospy.logerr('%s: unknown action: %s', self.name, action)
 
@@ -222,7 +232,7 @@ class MissionExecutor(object):
         )
 
         # save mission log
-        with open(self.mission_log, 'at') as mlog:
+        with open(self.output_log, 'at') as mlog:
             mlog.write(out)
 
 
@@ -246,6 +256,8 @@ class MissionExecutor(object):
                 self.handle_feedback(ACTION_ACHIEVED)
 
     def send_path_request(self, poses, **kwargs):
+        self.path_enabled = True
+
         # params
         mode = kwargs.get('mode', 'fast')
         timeout = kwargs.get('timeout', 1000)
@@ -288,17 +300,50 @@ class MissionExecutor(object):
             self.r_main.sleep()
 
 
+
+def parse_arguments(args=None):
+    parser = argparse.ArgumentParser(
+        description='Utility for running experiments using the mission executor.',
+        epilog='This is part of saetta_energy module.'
+    )
+
+    # mission group
+    parser.add_argument('mission', type=str, help='JSON file of mission actions.')
+
+    # output group
+    parser.add_argument('--output', default='~', help='Output dir to save mission logs.')
+    parser.add_argument('--label', default='current', help='Optional comment to add to the result file.')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Print detailed information.')
+
+    if args is not None:
+        return parser.parse_args(args)
+
+    return parser.parse_args()
+
+
+# TODO: change the mission to rehover on the final goal
+# (issuing an adjustment action to change the vehicle attitude before starting the navigation for the next goto)
+# think of getting the point of out a map of a real environment
+
 def main():
+    # parse arguments
+    rargv = rospy.myargv()
+
+    if rargv > 0:
+        args = parse_arguments(rargv[1:])
+    else:
+        args = parse_arguments()
+
+    mission_file = args.mission
+    output_dir = args.output
+    output_label = args.label
+
+    if output_dir == '~':
+        output_dir = os.path.expanduser('~')
+
+    # start ros node
     rospy.init_node('mission_executor')
     name = rospy.get_name()
-
-    rospy.loginfo('%s: init', name)
-    args = rospy.myargv()
-
-    mission_file = None
-
-    if len(args) > 1:
-        mission_file = args[1]
 
     # load mission
     try:
@@ -311,11 +356,13 @@ def main():
         rospy.logfatal('%s could not load the mission file (%s)', name, mission_file)
         sys.exit(-1)
 
+    rospy.loginfo('%s: init', name)
+
+    # init the executor
+    me = MissionExecutor(output_dir=output_dir)
+    me.execute(mission, output_label)
 
     # start the mission
-    me = MissionExecutor()
-    me.execute(mission)
-
     me.run()
 
 if __name__ == '__main__':

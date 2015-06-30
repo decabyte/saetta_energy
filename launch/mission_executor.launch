@@ -1,7 +1,10 @@
 <launch>
+    <!-- default args -->
+    <arg name="mfile" default="$(find saetta_energy)/data/mission_one.json"/>
+    <arg name="mdir" default="$(find saetta_energy)/data"/>
 
     <!-- mission executor -->
-    <node name="mission_executor" pkg="saetta_energy" type="node_executor.py" args="$(find saetta_energy)/data/mission_one.json" output="screen">
+    <node name="mission_executor" pkg="saetta_energy" type="node_executor.py" args="--output=$(arg mdir) $(arg mfile)" output="screen">
         <param name="test" value=""/>
     </node>
 
