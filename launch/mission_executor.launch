@@ -1,0 +1,11 @@
+<launch>
+
+    <!-- mission executor -->
+    <node name="mission_executor" pkg="saetta_energy" type="node_executor.py" args="$(find saetta_energy)/data/mission_one.json" output="screen">
+        <param name="test" value=""/>
+    </node>
+
+    <!-- temporary -->
+    <include file="$(find saetta_energy)/launch/energy_monitor.launch"/>
+
+</launch>
