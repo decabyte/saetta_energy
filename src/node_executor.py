@@ -19,7 +19,9 @@ import rospy
 import roslib
 roslib.load_manifest('saetta_energy')
 
-from saetta_energy.utils import *
+from vehicle_core.path import trajectory_tools as tt
+from saetta_energy import tsp
+from saetta_energy.utils import id_generator, urlify
 
 from vehicle_interface.msg import PathRequest, PathStatus, PilotStatus, Vector6
 from vehicle_interface.srv import BooleanService, PathService, PathServiceRequest, PathServiceResponse
@@ -55,7 +57,13 @@ class MissionExecutor(object):
 
     def __init__(self, **kwargs):
         self.name = rospy.get_name()
-        self.mission = None
+
+        # mission data
+        self.config = None
+        self.ips = []
+        self.actions = []
+
+        self.e_perf = 300.0          # navigation cost (J/m)
 
         # mission state machine
         self.state_mission = MISSION_IDLE
@@ -67,8 +75,9 @@ class MissionExecutor(object):
         }
 
         # action state machine
-        self.state_action = ACTION_IDLE
         self.action_id = 0
+        self.state_action = ACTION_IDLE
+        self.last_action = None
 
         # path monitoring
         self.current_path_id = -1
@@ -84,6 +93,7 @@ class MissionExecutor(object):
         }
 
         # output
+        self.label = 'current'
         self.output_dir = kwargs.get('output_dir', os.path.expanduser('~'))
         self.output_log = None
 
@@ -97,34 +107,14 @@ class MissionExecutor(object):
         self.pub_path = rospy.Publisher(TOPIC_PATH_REQ, PathRequest, queue_size=1)
         self.sub_path = rospy.Subscriber(TOPIC_PATH_STS, PathStatus, self.handle_path_status, queue_size=10)
         self.srv_path = rospy.ServiceProxy(TOPIC_PATH_SRV, PathService)
-
         self.sub_energy = rospy.Subscriber(TOPIC_ENERGY, EnergyReport, self.handle_energy, queue_size=10)
 
         # rate
         self.r_main = rospy.Rate(DEFAULT_RATE)
 
 
-    def handle_energy(self, data):
-        self.energy_last = data.energy_used
-
-    def execute(self, mission, label=None):
-        if self.mission is not None:
-            rospy.logwarn('%s: executing mission, please abort current execution first ...')
-            return
-
-        if mission.get('name', None) is None:
-            rospy.logwarn('%s: bad mission input, mission name required ...')
-            return
-
-        # store mission data
-        self.mission = mission
-
-        if label is None:
-            self.label = urlify(self.mission['name'])
-        else:
-            self.label = label
-
-        output_file = '{}_{}.csv'.format(self.label, id_generator(6))
+    def _init_log(self, label):
+        output_file = '{}_{}.csv'.format(label, id_generator(6))
         self.output_log = os.path.join(self.output_dir, output_file)
 
         # init output log
@@ -134,19 +124,31 @@ class MissionExecutor(object):
             with open(self.output_log, 'wt') as mlog:
                 mlog.write('name,action,time_start,time_end,time_elapsed,energy_used\n')
 
-        # change state
-        if self.state_mission is MISSION_IDLE:
-            self.state_mission = MISSION_RUN
+    def _write_log(self, label, action):
+        # record action stats
+        self.time_end = time.time()
+        self.time_elapsed = self.time_end - self.time_start
+        self.energy_used = self.energy_last - self.energy_start
 
+        # generate mission log
+        out = '{},{},{},{},{},{}\n'.format(
+            label, action, self.time_start, self.time_end, self.time_elapsed, self.energy_used
+        )
+
+        # save mission log
+        with open(self.output_log, 'at') as mlog:
+            mlog.write(out)
+
+    def handle_energy(self, data):
+        self.energy_last = data.energy_used
 
     def state_idle(self):
         pass
 
     def state_run(self):
-
         if self.state_action == ACTION_IDLE:
             try:
-                current_action = self.mission['actions'][self.action_id]
+                current_action = self.actions[self.action_id]
 
                 # start a new action
                 self.dispatch_action(current_action)
@@ -174,14 +176,13 @@ class MissionExecutor(object):
     def state_completed(self):
         rospy.signal_shutdown('mission completed')
 
-
     def dispatch_action(self, action):
         rospy.loginfo('%s: dispatching action[%d]: %s', self.name, self.action_id, action['name'])
 
         # action stats
+        self.last_action = action['name']
         self.time_start = time.time()
         self.energy_start = self.energy_last
-        self.last_action = action['name']
 
         if action['name'] == ACT_GOTO:
             poses = []
@@ -207,19 +208,7 @@ class MissionExecutor(object):
             return
 
         # record action stats
-        self.time_end = time.time()
-        self.time_elapsed = self.time_end - self.time_start
-        self.energy_used = self.energy_last - self.energy_start
-
-        # generate mission log
-        out = '{},{},{},{},{},{}\n'.format(
-            self.label, self.last_action, self.time_start, self.time_end, self.time_elapsed, self.energy_used
-        )
-
-        # save mission log
-        with open(self.output_log, 'at') as mlog:
-            mlog.write(out)
-
+        self._write_log(self.label, self.last_action)
 
     # TEMP: mock the action system with path requests
     def handle_path_status(self, data):
@@ -271,6 +260,75 @@ class MissionExecutor(object):
         except Exception:
             rospy.logerr('%s: unable to communicate with path service ...', self.name)
 
+    def execute_mission(self, config, **kwargs):
+        if self.config is not None:
+            rospy.logwarn('%s: executing mission, please abort current execution first ...')
+            return
+
+        # process mission data
+        inspection_points = config.get('ips', None)
+
+        if self.ips is None:
+            rospy.logwarn('%s: wrong mission input, skipping ...', self.name)
+            return
+        else:
+            inspection_points = np.array(inspection_points)
+            inspection_points = np.atleast_2d(inspection_points)
+
+        # store config
+        self.config = config
+        self.label = config.get('output_label', 'current')
+        self.output_log = os.path.join(self.output_dir, '{}_{}.csv'.format(self.label, id_generator(6)))
+
+        # init mission
+        self.state_mission = MISSION_IDLE
+        self._init_log(self.label)
+
+        # initial plan
+        self.ips = {'IP_%d' % n: inspection_points[n, :] for n in xrange(inspection_points.shape[0])}
+        self.ips_state = {'IP_%d' % n: 0 for n in xrange(inspection_points.shape[0])}
+
+        self._plan()
+
+        # change state
+        self.state_mission = MISSION_RUN
+
+
+    def _plan(self):
+        # select ips to visit
+        ip_labels = [ip for ip, s in self.ips_state.iteritems() if s == 0]
+
+        k = len(ip_labels)
+        self.ips_costs = np.zeros((k, k))
+
+        # update costs
+        for i in xrange(k):
+            for j in xrange(k):
+                if i == j:
+                    continue
+
+                dist = tt.distance_between(self.ips[ip_labels[i]], self.ips[ip_labels[j]], spacing_dim=3)
+                cost = self.e_perf * dist
+
+                self.ips_costs[i][j] = cost
+
+        # optimal route
+        route, cost, _ = tsp.tsp_problem(ip_labels, self.ips_costs)
+
+        rospy.loginfo('%s: found inspection route:\n%s', self.name, route)
+
+        # generate action sequence
+        for r in route:
+            self.actions.append({
+                'name': 'goto',
+                'params': {
+                    'pose': self.ips[r]
+                }
+            })
+
+        rospy.loginfo('%s: generated action sequence (n=%d)', self.name, len(self.actions))
+
+        print(self.actions)
 
     def run(self):
         # mission init
@@ -288,12 +346,12 @@ class MissionExecutor(object):
 
 def parse_arguments(args=None):
     parser = argparse.ArgumentParser(
-        description='Utility for running experiments using the mission executor.',
+        description='Utility for running inspection missions with the executor module.',
         epilog='This is part of saetta_energy module.'
     )
 
     # mission group
-    parser.add_argument('mission', type=str, help='JSON file of mission actions.')
+    parser.add_argument('config', type=str, help='Mission config file (JSON format).')
 
     # output group
     parser.add_argument('--output', default='~', help='Output dir to save mission logs.')
@@ -305,7 +363,6 @@ def parse_arguments(args=None):
 
     return parser.parse_args()
 
-
 def main():
     # parse arguments
     rargv = rospy.myargv()
@@ -315,7 +372,7 @@ def main():
     else:
         args = parse_arguments()
 
-    mission_file = args.mission
+    config_file = args.config
     output_dir = args.output
     output_label = args.label
 
@@ -325,23 +382,29 @@ def main():
     # start ros node
     rospy.init_node('mission_executor')
     name = rospy.get_name()
-
-    # load mission
-    try:
-        with open(mission_file, 'rt') as mf:
-            mission = mf.read()
-
-        mission = json.loads(mission)
-    except Exception:
-        rospy.logerr(traceback.format_exc())
-        rospy.logfatal('%s could not load the mission file (%s)', name, mission_file)
-        sys.exit(-1)
-
     rospy.loginfo('%s: init', name)
 
+    # load mission config
+    try:
+        with open(config_file, 'rt') as mf:
+            config = mf.read()
+
+        config = json.loads(config)
+    except Exception:
+        rospy.logerr(traceback.format_exc())
+        rospy.logfatal('%s could not load the cpnfig file (%s)', name, config_file)
+        sys.exit(-1)
+
+    current_config = dict()
+    current_config.update({
+        'output_dir': output_dir,
+        'output_label': output_label
+    })
+    current_config.update(config)
+
     # init the executor
-    me = MissionExecutor(output_dir=output_dir)
-    me.execute(mission, output_label)
+    me = MissionExecutor()
+    me.execute_mission(current_config)
 
     # start the mission
     me.run()

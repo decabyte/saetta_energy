@@ -1,6 +1,6 @@
 <launch>
     <!-- default args -->
-    <arg name="mfile" default="$(find saetta_energy)/data/mission_one.json"/>
+    <arg name="mfile" default="$(find saetta_energy)/data/mission_config.json"/>
     <arg name="mdir" default="$(find saetta_energy)/data"/>
 
     <!-- mission executor -->
