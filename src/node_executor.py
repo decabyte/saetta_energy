@@ -7,10 +7,8 @@ import os
 import traceback
 import argparse
 import json
-import random
-import string
 import time
-import re
+import collections
 
 import numpy as np
 np.set_printoptions(precision=3, suppress=True)
@@ -63,7 +61,7 @@ class MissionExecutor(object):
         # mission data
         self.config = None
         self.plan_id = 0
-        self.ips = []
+        self.ips_dict = []
         self.actions = []
 
         # estimation config
@@ -299,7 +297,7 @@ class MissionExecutor(object):
         # process mission data
         inspection_points = config.get('ips', None)
 
-        if self.ips is None:
+        if self.ips_dict is None:
             rospy.logwarn('%s: wrong mission input, skipping ...', self.name)
             return
         else:
@@ -318,7 +316,7 @@ class MissionExecutor(object):
         self._init_log(self.output_label)
 
         # initial plan
-        self.ips = {'IP_%d' % n: inspection_points[n, :] for n in xrange(inspection_points.shape[0])}
+        self.ips_dict = {'IP_%d' % n: inspection_points[n, :] for n in xrange(inspection_points.shape[0])}
         self.ips_state = {'IP_%d' % n: 0 for n in xrange(inspection_points.shape[0])}
 
         self._plan()
@@ -327,7 +325,7 @@ class MissionExecutor(object):
         self.state_mission = MISSION_RUN
 
 
-    def _plan(self):
+    def _plan_tsp(self):
         # select ips to visit
         ips_labels = [ip for ip, s in self.ips_state.iteritems() if s == 0]
 
@@ -340,7 +338,7 @@ class MissionExecutor(object):
                 if i == j:
                     continue
 
-                dist = tt.distance_between(self.ips[ips_labels[i]], self.ips[ips_labels[j]], spacing_dim=3)
+                dist = tt.distance_between(self.ips_dict[ips_labels[i]], self.ips_dict[ips_labels[j]], spacing_dim=3)
                 cost = self.e_perf * dist
 
                 self.ips_costs[i][j] = cost
@@ -350,11 +348,17 @@ class MissionExecutor(object):
 
         rospy.loginfo('%s: found inspection route:\n%s', self.name, route)
 
+    def _plan(self):
+        k = len(self.ips_dict)
+        self.ips_costs = np.zeros((k, k))
+
+        # generate standard route (default ordering)
+        route = sorted(self.ips_state.keys(), key=lambda x: int(x.split('IP_')[1]))
+
         # generate action sequence
         #   first hover on spot (with los for first IP)
-
         next_pose = np.copy(self.pos)
-        next_pose[5] = tt.calculate_orientation(self.pos, self.ips[route[0]])
+        next_pose[5] = tt.calculate_orientation(self.pos, self.ips_dict[route[0]])
 
         self.actions.append({
             'name': 'hover',
@@ -367,14 +371,14 @@ class MissionExecutor(object):
             self.actions.append({
                 'name': 'goto',
                 'params': {
-                    'pose': self.ips[route[n]].tolist()
+                    'pose': self.ips_dict[route[n]].tolist()
                 }
             })
 
-            next_pose = np.copy(self.ips[route[n]])
+            next_pose = np.copy(self.ips_dict[route[n]])
 
             if n < len(route) - 1:
-                next_pose[5] = tt.calculate_orientation(self.ips[route[n]], self.ips[route[n + 1]])
+                next_pose[5] = tt.calculate_orientation(self.ips_dict[route[n]], self.ips_dict[route[n + 1]])
 
             self.actions.append({
                 'name': 'hover',
@@ -390,7 +394,7 @@ class MissionExecutor(object):
 
         plan = {
             'ips_count': k,
-            'ips_label': ips_labels,
+            #'ips_label': ips_labels,
             'ips_state': self.ips_costs.tolist(),
             'time': time.time(),
             'actions': self.actions,
