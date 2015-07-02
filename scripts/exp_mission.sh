@@ -20,7 +20,7 @@ WATER_SPEED[5]=0.25
 WATER_SPEED[6]=0.30
 
 # config
-MISSION="/home/valerio/src/saetta_energy/data/mission_one.json"
+MISSION="/home/valerio/src/saetta_energy/data/mission_config.json"
 OUTPUT="$(pwd)"
 
 # utils
