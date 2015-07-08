@@ -16,7 +16,7 @@ uint8 ACTION_PAUSE=1                       # pause the action
 uint8 ACTION_ABORT=2                       # cancel the action
 
 # action feedback
-uint8 FEED_ONETIME=0
+uint8 FEED_SINGLE=0
 uint8 FEED_STREAM=1
 
 # message body
@@ -24,7 +24,7 @@ Header header                                   # header field used for keep tra
 
 uint32 id                                       # progressive numerical id for the action
 uint8 command                                   # command to trigger on an existing action given its id
-uint8 feedback                                  # type of feedback (e.g. continuous / one-time)
+uint8 feedback                                  # type of feedback (e.g. single / streaming)
 string name                                     # fully qualified name of the action (or signal if id = 0)
 
 float64 timeout                                 # (optional) expected duration in seconds

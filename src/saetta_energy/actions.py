@@ -3,6 +3,8 @@
 
 from __future__ import division, absolute_import
 
+import abc
+
 import rospy
 import roslib
 roslib.load_manifest('saetta_energy')
@@ -23,8 +25,8 @@ DEFAULT_SLEEP = 1.0         # seconds
 class ActionServer(object):
 
     def __init__(self, fqn, **kwargs):
-        if fqn is None:
-            raise ValueError('Action fully-qualified-name can not be None')
+        if fqn is None or fqn == '':
+            raise ValueError('Action fully-qualified-name can not be empty.')
 
         self.id = 1
         self.fqn = fqn
@@ -35,33 +37,42 @@ class ActionServer(object):
         self.state = STATE_NONE
         self.timeout = 0.0
         self.duration = 0.0
+        self.feedback = ActionFeedback.ACTION_IDLE
+        self.feedback_style = ActionDispatch.FEED_SINGLE
 
         # ros interface
         self.pub_feed = rospy.Publisher(self.topic_feed, ActionFeedback, queue_size=10)
-        self.sub_disp = rospy.Subscriber(self.topic_disp, ActionDispatch, self.handle_dispatch, queue_size=10)
+        self.sub_disp = rospy.Subscriber(self.topic_disp, ActionDispatch, self._receive_dispatch, queue_size=10)
 
 
-    def handle_dispatch(self, data):
+    def _receive_dispatch(self, data):
         if data.name != self.fqn:
             return
 
         if data.id == 0:
             return
 
-        if self.state != STATE_NONE:
+        if self.state == STATE_RUNNING:
+            self._send_feedback(id=data.id, status=ActionFeedback.ACTION_REJECT)
             return
 
+        # store request
         self.id = data.id
         self.timeout = data.timeout
+        self.params = {param.key: param.value for param in data.params}
+
+        # invoke callback
+        self.handle_dispatch(self.timeout, self.params)
 
     def _send_feedback(self, **kwargs):
-        status = kwargs.get('status', ActionFeedback.ACTION_RUNNING)
+        status = kwargs.get('status', self.feedback)
         duration = kwargs.get('duration', 0.0)
         info = kwargs.get('info', {})
+        id = kwargs.get('id', self.id)
 
         msg = ActionFeedback()
         msg.header.stamp = rospy.Time.now()
-        msg.id = self.id
+        msg.id = id
         msg.name = self.fqn
         msg.status = status
         msg.duration = duration
@@ -69,32 +80,42 @@ class ActionServer(object):
 
         self.pub_feed.publish(msg)
 
+
+    def handle_dispatch(self, timeout, params):
+        return NotImplementedError
+
     def run(self):
+        return NotImplementedError
+
+    def loop(self):
+        if self.state == STATE_NONE:
+            self.feedback = ActionFeedback.ACTION_IDLE
+            return
+
+        if self.state == STATE_RUNNING:
+            self.feedback = ActionFeedback.ACTION_RUNNING
+            self.run()
+            self._send_feedback()
+            return
+
+        if self.state == STATE_DONE:
+            self._send_feedback()
+            return
+
+    def spin(self):
         while not rospy.is_shutdown():
-
-            if self.state == STATE_NONE:
-                rospy.sleep(DEFAULT_SLEEP)
-                continue
-
-            if self.state == STATE_RUNNING:
-                self._send_feedback()
-                rospy.sleep(DEFAULT_SLEEP)
-                continue
-
-            if self.state == STATE_DONE:
-                self._send_feedback(status=ActionFeedback.ACTION_SUCCESS)
-                self.state = STATE_NONE
-                continue
+            self.loop()
+            rospy.sleep(DEFAULT_SLEEP)
 
     def __str__(self):
-        return '%s[%s]: id[%d] state[%s]' % (ActionServer.__name__, self.fqn, self.id, self.state)
+        return '%s[%s]: id[%d] state[%s]' % (self.__class__.__name__, self.fqn, self.id, self.state)
 
 
 class ActionClient(object):
 
     def __init__(self, fqn, **kwargs):
-        if fqn is None:
-            raise ValueError('Action fully-qualified-name can not be None')
+        if fqn is None or fqn == '':
+            raise ValueError('Action fully-qualified-name can not be empty')
 
         self.id = 1
         self.fqn = fqn
@@ -146,4 +167,4 @@ class ActionClient(object):
         self.pub_disp.publish(msg)
 
     def __str__(self):
-        return '%s[%s]: id[%d] state[%s]' % (ActionClient.__name__, self.fqn, self.id, self.state)
+        return '%s[%s]: id[%d] state[%s]' % (self.__class__.__name__, self.fqn, self.id, self.state)

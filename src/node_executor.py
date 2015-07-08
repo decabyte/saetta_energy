@@ -131,7 +131,7 @@ class MissionExecutor(object):
             rospy.loginfo('%s: saving mission output to file (%s)', self.name, self.output_log)
 
             with open(self.output_log, 'wt') as mlog:
-                mlog.write('name,action,time_start,time_end,time_elapsed,energy_used,direction,distance\n')
+                mlog.write('id,action,label,time_start,time_end,time_elapsed,energy_used,direction,distance\n')
 
     def _write_log(self, label, action):
         # record action stats
@@ -145,8 +145,9 @@ class MissionExecutor(object):
             extra ='{},{}'.format(self.last_los_orient, self.last_los_dist)
 
         # generate mission log
-        out = '{},{},{},{},{},{},{}\n'.format(
-            label, action['name'], self.time_start, self.time_end, self.time_elapsed, self.energy_used, extra
+        out = '{},{},{},{},{},{},{},{}\n'.format(
+            self.action_id, action['name'], label, self.time_start, self.time_end,
+            self.time_elapsed, self.energy_used, extra
         )
 
         # save mission log
@@ -261,7 +262,7 @@ class MissionExecutor(object):
 
         # params
         mode = kwargs.get('mode', 'fast')
-        timeout = kwargs.get('timeout', 1000)
+        timeout = kwargs.get('timeout', 5 * 60)
         target_speed = kwargs.get('target_speed', 1.0)
         look_ahead = kwargs.get('look_ahead', 5.0)
 
@@ -466,7 +467,7 @@ def main():
         config = json.loads(config)
     except Exception:
         rospy.logerr(traceback.format_exc())
-        rospy.logfatal('%s could not load the cpnfig file (%s)', name, config_file)
+        rospy.logfatal('%s could not load the config file (%s)', name, config_file)
         sys.exit(-1)
 
     ex_config = {
