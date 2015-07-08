@@ -213,7 +213,6 @@ class MissionExecutor(object):
             goal = action['params']['pose']
             poses = []
             poses.append(goal)
-            poses.append(goal)
 
             self.last_los_orient = tt.calculate_orientation(self.pos, goal)
             self.last_los_dist = tt.distance_between(self.pos, goal, spacing_dim=3)
@@ -222,7 +221,6 @@ class MissionExecutor(object):
         elif action['name'] == ACT_HOVER:
             goal = action['params']['pose']
             poses = []
-            poses.append(goal)
             poses.append(goal)
 
             self.send_path_request(poses, mode='simple')
