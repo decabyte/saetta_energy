@@ -28,7 +28,7 @@ from saetta_energy.msg import EnergyReport, EnergyStatus
 from diagnostic_msgs.msg import KeyValue
 
 
-TOPIC_NAV = 'nav/sts'
+TOPIC_NAV = 'nav/nav_sts'
 TOPIC_PATH_REQ = 'path/request'
 TOPIC_PATH_STS = 'path/status'
 TOPIC_PATH_SRV = 'path/control'
@@ -112,8 +112,8 @@ class MissionExecutor(object):
         self.last_los_dist = 0.0
 
         # ros interface
-        self.sub_nav = rospy.Subscriber(TOPIC_NAV, NavSts, self.handle_nav, queue_size=1)
-        self.pub_path = rospy.Publisher(TOPIC_PATH_REQ, PathRequest, queue_size=1)
+        self.sub_nav = rospy.Subscriber(TOPIC_NAV, NavSts, self.handle_nav, queue_size=10)
+        self.pub_path = rospy.Publisher(TOPIC_PATH_REQ, PathRequest, queue_size=10)
         self.sub_path = rospy.Subscriber(TOPIC_PATH_STS, PathStatus, self.handle_path_status, queue_size=10)
         self.srv_path = rospy.ServiceProxy(TOPIC_PATH_SRV, PathService)
         self.sub_energy = rospy.Subscriber(TOPIC_ENERGY, EnergyReport, self.handle_energy, queue_size=10)
