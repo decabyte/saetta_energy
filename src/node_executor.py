@@ -153,6 +153,7 @@ class MissionExecutor(object):
         # save mission log
         with open(self.output_log, 'at') as mlog:
             mlog.write(out)
+            mlog.flush()
 
     def handle_nav(self, data):
         # parse navigation data
@@ -229,8 +230,8 @@ class MissionExecutor(object):
             rospy.logerr('%s: unknown action: %s', self.name, action)
 
     def handle_feedback(self, status):
-        if self.state_action in (ACTION_RUNNING, ACTION_IDLE):
-            return
+        # if self.state_action in (ACTION_RUNNING, ACTION_IDLE):
+        #     return
 
         # record action stats
         self._write_log(self.output_label, self.last_action)
@@ -401,7 +402,7 @@ class MissionExecutor(object):
         }
 
         with open(plan_file, 'wt') as plog:
-            plog.write(json.dumps(plan))
+            plog.write(json.dumps(plan, indent=2))
 
         # increase plan counter (to keep track of future replans)
         self.plan_id += 1
