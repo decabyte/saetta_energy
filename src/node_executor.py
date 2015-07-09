@@ -229,13 +229,14 @@ class MissionExecutor(object):
             rospy.logerr('%s: unknown action: %s', self.name, action)
 
     def handle_feedback(self, status):
-        self.state_action = status
-
         if self.state_action in (ACTION_RUNNING, ACTION_IDLE):
             return
 
         # record action stats
         self._write_log(self.output_label, self.last_action)
+
+        # update status
+        self.state_action = status
 
     # TEMP: mock the action system with path requests
     def handle_path_status(self, data):

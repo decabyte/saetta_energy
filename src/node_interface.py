@@ -188,11 +188,15 @@ def main():
 
     # init path servers
     sg = GotoPathServer()
-    hg = HoverPathServer()
+    sh = HoverPathServer()
+
+    # init the path service
+    sg._reset_path()
+    rospy.sleep(DEFAULT_SLEEP)
 
     while not rospy.is_shutdown():
+        sh.loop()
         sg.loop()
-        hg.loop()
 
         rospy.sleep(DEFAULT_SLEEP)
 
