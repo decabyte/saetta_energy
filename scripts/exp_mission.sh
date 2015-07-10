@@ -25,7 +25,7 @@ OUTPUT="$(pwd)"
 
 # utils
 function vehicle_reset() {
-    rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [0.0, 0.001, 0.0, 0.001, 0.0, 0.001]"
+    rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [0.0, 0.001]"
 
 	rosparam set /pilot/fault_control false
 
@@ -84,7 +84,7 @@ do
 	rosparam set /pilot/optimal_allocation false
 
     # adjust water
-	rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.001, 0.0, 0.001, 0.0, 0.001]"
+	rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.001]"
 
     # reset failure and fault mitigation
 	# rosrun vehicle_core fault_clear.sh
