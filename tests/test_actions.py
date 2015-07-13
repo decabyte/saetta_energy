@@ -17,34 +17,19 @@ from saetta_energy.actions import ActionServer, ActionClient
 def main():
     rospy.init_node('test_actions')
 
-    N_SERVERS = 5
-    N_CLIENTS = 20
+    cg = ActionClient('hover')
 
-    action_servers = [ActionServer('action-%d' % d) for d in xrange(N_SERVERS)]
-    action_clients = [ActionClient('action-%d' % np.random.choice(N_SERVERS)) for _ in xrange(N_CLIENTS)]
+    pose = np.array([0, 0, 3, 0, 0, 0])
 
-    th_servers = [threading.Thread(target=server.run) for server in action_servers]
+    rospy.sleep(1.0)
+    rospy.loginfo('sending action')
 
-    # start the servers
-    map(lambda x: x.start(), th_servers)
+    cg._send_dispatch(params={'pose': '[0, 0, 3, 0, 0, 0]'})
 
     while not rospy.is_shutdown():
-        try:
-            cids = np.random.choice(action_clients, 5)
+        print(cg)
+        rospy.sleep(1.0)
 
-            # send actions
-            map(lambda x: x.send_action(params={'x': np.random.random(), 'y': np.random.random()}), cids)
-
-            print('-- running --')
-            rospy.sleep(3.0)
-        except Exception:
-            rospy.logfatal(traceback.format_exc())
-            rospy.signal_shutdown('user')
-
-    rospy.loginfo('closing!')
-
-    map(lambda x: x.join(), th_servers)
-    rospy.loginfo('done!')
 
 if __name__ == '__main__':
     main()

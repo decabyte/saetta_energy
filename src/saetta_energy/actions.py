@@ -127,10 +127,10 @@ class ActionClient(object):
 
         # ros interface
         self.pub_disp = rospy.Publisher(self.topic_disp, ActionDispatch, queue_size=10)
-        self.sub_feed = rospy.Subscriber(self.topic_feed, ActionFeedback, self.handle_feedback, queue_size=10)
+        self.sub_feed = rospy.Subscriber(self.topic_feed, ActionFeedback, self._receive_feedback, queue_size=10)
 
 
-    def handle_feedback(self, data):
+    def _receive_feedback(self, data):
         if data.name != self.fqn:
             return
 
@@ -140,16 +140,6 @@ class ActionClient(object):
         if data.id == self.id:
             if data.status == ActionFeedback.ACTION_SUCCESS:
                 self.state = STATE_DONE
-
-    def send_action(self, **kwargs):
-        if self.state == STATE_RUNNING:
-            return
-
-        self.id += 1
-        self.state = STATE_RUNNING
-
-        # start action
-        self._send_dispatch(command=ActionDispatch.ACTION_START)
 
     def _send_dispatch(self, **kwargs):
         command = kwargs.get('command', ActionDispatch.ACTION_START)
@@ -165,6 +155,18 @@ class ActionClient(object):
         msg.params = [KeyValue(k, v) for k, v in params.iteritems()]
 
         self.pub_disp.publish(msg)
+
+    def send_action(self, **kwargs):
+        # if self.state == STATE_RUNNING:
+        #     return
+
+        self.id += 1
+        #self.state = STATE_RUNNING
+        self.timeout = kwargs.pop('timeout', 0.0)
+        self.params = dict(**kwargs)
+
+        # start action
+        self._send_dispatch(command=ActionDispatch.ACTION_START, timeout=self.timeout, params=self.params)
 
     def __str__(self):
         return '%s[%s]: id[%d] state[%s]' % (self.__class__.__name__, self.fqn, self.id, self.state)

@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import division
 
+import ast
 import numpy as np
 np.set_printoptions(precision=3, suppress=True)
 
@@ -120,13 +121,15 @@ class PathActionServer(actions.ActionServer):
 
 
 class GotoPathServer(PathActionServer):
+    """Reference: http://stackoverflow.com/questions/1894269/convert-string-representation-of-list-to-list-in-python"""
+
     def __init__(self, **kwargs):
         super(GotoPathServer, self).__init__(ACTION_GOTO, **kwargs)
 
     def handle_dispatch(self, timeout, params):
         try:
-            goal = params['pose']
-        except KeyError:
+            goal = ast.literal_eval(params['pose'])
+        except (KeyError, SyntaxError):
             rospy.logerr('%s: received path action without pose param', self.__class__.__name__)
 
             self.feedback = ActionFeedback.ACTION_REJECT
@@ -159,8 +162,8 @@ class HoverPathServer(PathActionServer):
 
     def handle_dispatch(self, timeout, params):
         try:
-            goal = params['pose']
-        except KeyError:
+            goal = ast.literal_eval(params['pose'])
+        except (KeyError, SyntaxError):
             rospy.logerr('%s: received path action without pose param', self.__class__.__name__)
 
             self.feedback = ActionFeedback.ACTION_REJECT
