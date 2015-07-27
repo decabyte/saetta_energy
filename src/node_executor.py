@@ -432,7 +432,7 @@ def parse_arguments(args=None):
 
     # output group
     parser.add_argument('--output', default=None, help='Output dir to save mission logs.')
-    parser.add_argument('--label', default='current', help='Optional comment to add to the result file.')
+    parser.add_argument('--label', default='label', help='Optional comment to add to the result file.')
     parser.add_argument('-v', '--verbose', action='store_true', help='Print detailed information.')
 
     if args is not None:

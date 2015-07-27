@@ -3,12 +3,13 @@
     <arg name="mfile" default="$(find saetta_energy)/data/mission_config.json"/>
     <arg name="mdir" default="$(find saetta_energy)/data"/>
 
+    <!-- support nodes -->
+    <include file="$(find saetta_energy)/launch/energy_monitor.launch"/>
+    <node name="path_monitor" pkg="saetta_energy" type="node_path_monitor.py" args="" output="screen"/>
+
     <!-- mission executor -->
     <node name="mission_executor" pkg="saetta_energy" type="node_executor.py" args="--output=$(arg mdir) $(arg mfile)" output="screen">
         <param name="test" value=""/>
     </node>
-
-    <!-- temporary -->
-    <include file="$(find saetta_energy)/launch/energy_monitor.launch"/>
 
 </launch>

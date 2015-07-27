@@ -93,7 +93,7 @@ do
     recording_start $TAG $i 
 
     echo "starting ${TAG}_${i} navigation experiment"
-    rosrun vehicle_core path_executor.py 0 --mode="$MODE" --path="$TRJ" --output="$TAG" --label="${TAG}_${i}"
+    rosrun vehicle_core path_executor.py --mode="$MODE" --output="$TAG" --label="${TAG}_${i}" "$TRJ" 0
     echo "${TAG} run[$i]: exit code $?"
 
     # disable recording
@@ -131,7 +131,7 @@ do
     recording_start $TAG $i
 
     echo "starting ${TAG}_${i} navigation experiment"
-    rosrun vehicle_core path_executor.py 0 --mode="$MODE" --path="$TRJ" --output="$TAG" --label="${TAG}_${i}"
+    rosrun vehicle_core path_executor.py --mode="$MODE" --output="$TAG" --label="${TAG}_${i}" "$TRJ" 0
     echo "${TAG} run[$i]: exit code $?"
 
     # disable recording
@@ -169,7 +169,7 @@ do
     recording_start $TAG $i
 
     echo "starting ${TAG}_${i} navigation experiment"
-    rosrun vehicle_core path_executor.py 0 --mode="$MODE" --path="$TRJ" --output="$TAG" --label="${TAG}_${i}"
+    rosrun vehicle_core path_executor.py --mode="$MODE" --output="$TAG" --label="${TAG}_${i}" "$TRJ" 0
     echo "${TAG} run[$i]: exit code $?"
 
     # disable recording
@@ -203,7 +203,7 @@ do
     recording_start $TAG $i
 
     echo "starting ${TAG}_${i} navigation experiment"
-    rosrun vehicle_core path_executor.py 0 --mode="$MODE" --path="$TRJ" --output="$TAG" --label="${TAG}_${i}"
+    rosrun vehicle_core path_executor.py --mode="$MODE" --output="$TAG" --label="${TAG}_${i}" "$TRJ" 0
     echo "${TAG} run[$i]: exit code $?"
 
     # disable recording
@@ -241,7 +241,7 @@ do
     recording_start $TAG $i
 
     echo "starting ${TAG}_${i} navigation experiment"
-    rosrun vehicle_core path_executor.py 0 --mode="$MODE" --path="$TRJ" --output="$TAG" --label="${TAG}_${i}"
+    rosrun vehicle_core path_executor.py --mode="$MODE" --output="$TAG" --label="${TAG}_${i}" "$TRJ" 0
     echo "${TAG} run[$i]: exit code $?"
 
     # disable recording
@@ -279,7 +279,7 @@ do
     recording_start $TAG $i
 
     echo "starting ${TAG}_${i} navigation experiment"
-    rosrun vehicle_core path_executor.py 0 --mode="$MODE" --path="$TRJ" --output="$TAG" --label="${TAG}_${i}"
+    rosrun vehicle_core path_executor.py --mode="$MODE" --output="$TAG" --label="${TAG}_${i}" "$TRJ" 0
     echo "${TAG} run[$i]: exit code $?"
 
     # disable recording
