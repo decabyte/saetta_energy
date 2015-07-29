@@ -4,9 +4,6 @@ from __future__ import division
 
 import time
 import numpy as np
-import scipy as sci
-import scipy.stats
-
 np.set_printoptions(precision=3, suppress=True)
 
 import rospy
@@ -30,6 +27,8 @@ TOPIC_ENE = 'saetta/report'
 S_IDLE = 0
 S_RUNNING = 1
 
+DEFAULT_UPDATE = 2          # secs
+
 
 class PathMonitor(object):
 
@@ -46,10 +45,17 @@ class PathMonitor(object):
         self.energy_start = 0.0
         self.distance_travelled = 0.0
 
+        self.n_bins = int(kwargs.get('n_bins', 8))
         self.t_observe = float(kwargs.get('t_observe', 10.0))
-        self.sigma_phi_thr = kwargs.get('sigma_phi', np.deg2rad(10.0))
-        self.n_bins = int(kwargs.get('n_bins', 16))
-        self.phi_bins = (np.linspace(0, 2 * np.pi, self.n_bins) - np.pi)
+        self.phi_sigma = float(kwargs.get('sigma_phi', np.deg2rad(10.0)))
+        self.speed_thresh = float(kwargs.get('speed_thresh', 0.3))
+
+        self.initial_cost = float(kwargs.get('initial_cost', 100.0))
+        self.initial_spd = float(kwargs.get('initial_spd', 0.5))
+        self.n_samples = int(kwargs.get('n_samples', 10))
+
+        self.phi_edges = np.linspace(0, 2 * np.pi, self.n_bins + 1) - np.pi
+        self.phi_bins = self.phi_edges[:-1] + ((2 * np.pi / self.n_bins) / 2.0)
 
         self.chunk_yaw = []
         self.chunk_energy = 0.0
@@ -57,14 +63,11 @@ class PathMonitor(object):
         self.chunk_cost = 0.0
         self.chunk_start = 0.0
 
-        self.map_cost = self.n_bins * [[]]
-        self.map_spd = self.n_bins * [[]]
+        self.map_cost = self.initial_cost * np.ones((self.n_bins, self.n_samples))
+        self.map_spd = self.initial_spd * np.ones_like(self.map_cost)
 
-        # self.path_id = 0
-        # self.path_yaw_mean = 0.0
-        # self.path_yaw_std = 0.0
-        # self.path_energy_start = 0.0
-        # self.path_time_start = 0.0
+        self.est_cost = self.initial_cost * np.ones(self.n_bins)
+        self.est_spd = self.initial_spd * np.ones(self.n_bins)
 
         # ros interface
         self.sub_req = rospy.Subscriber(TOPIC_REQ, PathRequest, self.handle_request, queue_size=10)
@@ -72,24 +75,12 @@ class PathMonitor(object):
         self.sub_nav = rospy.Subscriber(TOPIC_NAV, NavSts, self.handle_nav, queue_size=10)
         self.sub_ene = rospy.Subscriber(TOPIC_ENE, EnergyReport, self.handle_energy, queue_size=10)
 
-        # visualization
-        #self.fig = None
-
-        import matplotlib as mpl
-        import matplotlib.pyplot as plt
-        import matplotlib.animation as animation
-
-        mpl.style.use('bmh')
-        mpl.rcParams['figure.figsize'] = (12.0, 6.0)
-
-        self.fig, self.ax = plt.subplots(subplot_kw=dict(polar=True))
-        plt.show()
-
-        self.t_vis = rospy.Timer(rospy.Duration(2), self.show_costs)
+        # timers
+        self.t_upd = rospy.Timer(rospy.Duration(DEFAULT_UPDATE), self.update_costs)
 
 
     def handle_energy(self, data):
-        self.energy_last = data.energy_used
+        self.energy_last = data.energy_used * 3600      # J = Wh * 3600 = Ws = J
 
     def handle_nav(self, data):
         # parse navigation data
@@ -159,65 +150,75 @@ class PathMonitor(object):
         self.chunk_yaw.append(self.pos[5])
         time_delta = time.time() - self.chunk_start
 
-        if np.std(self.chunk_yaw) > self.sigma_phi_thr or time_delta > self.t_observe:
-            # update odometer
-            self.chunk_dist = np.copy(self.distance_travelled)
-            self.distance_travelled = 0.0
+        if np.std(self.chunk_yaw) > self.phi_sigma or time_delta > self.t_observe:
+            # statistical analysis
+            #   select the most frequent yaw value from modes (aka the mode)
+            mu = np.mean(self.chunk_yaw)
+            nu = np.median(self.chunk_yaw)
+            sigma = np.std(self.chunk_yaw)
 
-            # update energy meter
+            # local binning and mode extraction
+            #   diff extracts the
+            hist, bin_edges = np.histogram(self.chunk_yaw, bins=10)
+            mode = bin_edges[np.argmax(hist)] + (bin_edges[1] - bin_edges[0]) / 2.0
+
+            rospy.loginfo('%s: chunk: mean: %.3f, sigma: %.3f,  median: %.3f, mode: %.3f', self.name,
+                np.rad2deg(mu), np.rad2deg(sigma), np.rad2deg(nu), np.rad2deg(mode)
+            )
+
+            # chunk variance rejection
+            if sigma > self.phi_sigma * 1.5:
+                self.reset_chunk()
+                rospy.loginfo('%s: chuck discarded: sigma: %.3f', self.name, np.rad2deg(sigma))
+                return
+
+            # update odometer and energy meter
+            self.chunk_dist = np.copy(self.distance_travelled)
             self.chunk_energy = self.energy_last - self.energy_start
-            self.energy_start = np.copy(self.energy_last)
 
             # chunk metrics
             self.chunk_duration = time.time() - self.chunk_start
             self.chunk_cost = self.chunk_energy / self.chunk_dist
             self.chunk_spd = self.chunk_dist / self.chunk_duration
 
-            # statistical analysis
-            mu = np.mean(self.chunk_yaw)
-            nu = np.median(self.chunk_yaw)
-            sigma = np.std(self.chunk_yaw)
+            # chunk speed rejection
+            if self.chunk_spd < self.speed_thresh:
+                self.reset_chunk()
+                rospy.loginfo('%s: chuck discarded: spd: %.3f', self.name, self.chunk_spd)
+                return
 
-            # select the most frequent yaw value
-            modes = sci.stats.mode(self.chunk_yaw)
-            m = modes[0][np.argmax(modes[1])]
+            # direction binning (selecting the yaw sector)
+            #   bins[i-1] <= x < bins[i]
+            self.chunk_bin = np.digitize([mode], self.phi_edges)[0] - 1
 
-            # binning
-            self.chunk_bin = np.digitize([m], self.phi_bins)
+            if self.chunk_bin < 0:
+                self.reset_chunk()
+                rospy.loginfo('%s: chuck discarded: bin: %d', self.name, self.chunk_bin)
+                return
+
+            # map roll
+            self.map_cost[self.chunk_bin, :] = np.roll(self.map_cost[self.chunk_bin, :], -1)
+            self.map_spd[self.chunk_bin, :] = np.roll(self.map_spd[self.chunk_bin, :], -1)
 
             # map update
-            self.map_cost[self.chunk_bin].append(self.chunk_cost)
-            self.map_spd[self.chunk_bin].append(self.chunk_spd)
+            self.map_cost[self.chunk_bin, -1] = self.chunk_cost
+            self.map_spd[self.chunk_bin, -1] = self.chunk_spd
 
-            # reset chunk
-            self.chunk_yaw = []
-
-            # enable visualization
-            self.show_costs()
+            rospy.loginfo('%s: chuck update: bin: %d, cost: %.3f, spd: %.3f', self.name, self.chunk_bin, self.chunk_cost, self.chunk_spd)
+            self.reset_chunk()
 
 
-    def show_costs(self, event=None):
-        #if self.fig is None:
-            # self.line = self.ax.plot([], [])
-            #
-            # # initialization function: plot the background of each frame
-            # def init():
-            #     self.line.set_data([], [])
-            #     return self.line
-            #
-            # # animation function. this is called sequentially
-            # def animate(i):
-            #     x = np.rad2deg(self.phi_bins)
-            #     y = [np.mean(b) for b in self.map_cost]
-            #     self.line.set_data(x, y)
-            #     return self.line
-            #
-            # # call the animator.  blit=True means only re-draw the parts that have changed.
-            # self.anim = animation.FuncAnimation(self.fig, animate, init_func=init, frames=200, interval=20, blit=True, repeat=True)
+    def reset_chunk(self):
+        self.distance_travelled = 0.0
+        self.energy_start = np.copy(self.energy_last)
+        self.chunk_start = time.time()
+        self.chunk_yaw = []
 
-        self.ax.clear()
-        self.ax.plot(np.rad2deg(self.phi_bins), [np.mean(b) for b in self.map_cost])
+    def update_costs(self, event=None):
+        weights = np.exp(np.linspace(0, 1, self.n_samples)) / np.exp(1)
 
+        self.est_cost = np.average(self.map_cost, weights=weights, axis=1).flatten()
+        self.est_spd = np.average(self.map_spd, weights=weights, axis=1).flatten()
 
     # def _pre_analyse_path(self, data):
     #     wps = np.array([p.values for p in data.points])
@@ -257,13 +258,48 @@ def main():
     rospy.init_node('path_monitor')
     pm = PathMonitor()
 
-    rospy.spin()
+    import matplotlib as mpl
+    import matplotlib.pyplot as plt
 
-    # while not rospy.is_shutdown():
-    #     print('state: %s ' % pm.state)
-    #     rospy.sleep(1.0)
+    import scipy as sci
+    import scipy.interpolate
 
+    mpl.style.use('bmh')
+    mpl.rcParams['figure.figsize'] = (8, 8)
 
+    # http://stackoverflow.com/questions/9071084/polar-contour-plot-in-matplotlib-best-modern-way-to-do-it
+    fig, ax = plt.subplots(subplot_kw=dict(projection='polar'))
+
+    steps = 20
+    th = np.linspace(pm.phi_edges[0], pm.phi_edges[-1], steps * pm.n_bins)
+
+    while not rospy.is_shutdown():
+        #m = np.mean(pm.map_cost, axis=1).flatten()
+
+        m = np.copy(pm.est_cost)
+        r = m.reshape((-1, 1)).repeat(steps, axis=1).flatten()
+
+        tck = sci.interpolate.splrep(pm.phi_bins, m)
+        rint = sci.interpolate.splev(th, tck)
+
+        ax.clear()
+        ax.set_theta_direction(-1)
+        ax.set_theta_zero_location('N')
+        ax.set_xlabel('Heading (deg)')
+        #ax.set_ylabel('Energy Cost (J/m)')
+        ax.set_title('Energy Cost vs Heading (map)')
+
+        ax.plot(th, r, 'o')
+        ax.plot(th, rint)
+
+        ax.set_rmax(np.max(r) * 1.1)
+
+        plt.draw()
+        plt.savefig('/tmp/map_cost.png', dpi=90)
+
+        rospy.sleep(2.0)
+
+    # rospy.spin()
 
 if __name__ == '__main__':
     main()
