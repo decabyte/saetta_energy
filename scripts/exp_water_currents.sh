@@ -84,7 +84,8 @@ do
 	rosparam set /pilot/optimal_allocation false
 
     # adjust water
-	rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.05, 0.01]"
+    rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.025, 0.001]"
+	#rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.05, 0.01]"
 
     # reset failure and fault mitigation
 	# rosrun vehicle_core fault_clear.sh
