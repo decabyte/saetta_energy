@@ -12,12 +12,12 @@ declare -a WATER_SPEED
 
 # water current speed
 WATER_SPEED[0]=0.00
-WATER_SPEED[1]=0.05
-WATER_SPEED[2]=0.10
-WATER_SPEED[3]=0.15
-WATER_SPEED[4]=0.20
-WATER_SPEED[5]=0.25
-WATER_SPEED[6]=0.30
+WATER_SPEED[1]=0.10
+WATER_SPEED[2]=0.20
+WATER_SPEED[3]=0.30
+WATER_SPEED[4]=0.40
+WATER_SPEED[5]=0.50
+WATER_SPEED[6]=0.60
 
 # config
 MISSION="/home/valerio/src/saetta_energy/data/mission_config.json"
@@ -35,6 +35,8 @@ function vehicle_reset() {
 	rosservice call /pilot/switch "request: false"
 	rosservice call /pilot/fault_control "request: false"
 	rosservice call /nav/reset
+
+	rosservice call /saetta/map/reset
 }
 
 function recording_start() {
@@ -92,7 +94,7 @@ do
 	# rosservice call /pilot/fault_control "request: false"
 
     # enable recording
-    recording_start $TAG $index
+    recording_start $TAG $WS
 
     echo "starting ${TAG}_${index} navigation experiment"
     rosrun saetta_energy node_executor.py --output="$OUTPUT" --label="${TAG}_${WS}" $MISSION

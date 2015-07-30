@@ -25,6 +25,7 @@ roslib.load_manifest('saetta_energy')
 from auv_msgs.msg import NavSts
 from vehicle_interface.msg import PathRequest, PathStatus, FloatArrayStamped
 from saetta_energy.msg import EnergyReport, EnergyStatus
+from std_srvs.srv import Empty
 
 # topics
 TOPIC_NAV = 'nav/nav_sts'
@@ -32,7 +33,7 @@ TOPIC_REQ = 'path/request'
 TOPIC_STS = 'path/status'
 TOPIC_PIL = 'pilot/status'
 TOPIC_ENE = 'saetta/report'
-
+SRV_RESET = 'saetta/map/reset'
 TOPIC_MAP_EJM = 'saetta/map/energy'
 TOPIC_MAP_SPD = 'saetta/map/speed'
 
@@ -93,8 +94,15 @@ class PathMonitor(object):
         self.pub_map_ejm = rospy.Publisher(TOPIC_MAP_EJM, FloatArrayStamped, queue_size=10, latch=True)
         self.pub_map_spd = rospy.Publisher(TOPIC_MAP_SPD, FloatArrayStamped, queue_size=10, latch=True)
 
+        # reset interface
+        self.srv_reset = rospy.Service(SRV_RESET, Empty, self.handle_reset)
+
         # timers
         self.t_upd = rospy.Timer(rospy.Duration(DEFAULT_UPDATE), self.update_costs)
+
+        # (temp) keep tracks of resets
+        self.date = datetime.datetime.now()
+        self.label = self.date.strftime('%Y%m%d_%H%M%S')
 
 
     def handle_energy(self, data):
@@ -158,6 +166,27 @@ class PathMonitor(object):
             # reset state
             self.state = S_IDLE
 
+    def handle_reset(self, req):
+        rospy.logwarn('%s: resetting estimations and maps ...', self.name)
+
+        # disable if running
+        self.state = S_IDLE
+
+        # clean initial belief
+        self.map_ejm = self.initial_ejm * np.ones((self.n_bins, self.n_samples))
+        self.map_spd = self.initial_spd * np.ones_like(self.map_ejm)
+
+        self.est_ejm = self.initial_ejm * np.ones(self.n_bins)
+        self.est_spd = self.initial_spd * np.ones(self.n_bins)
+
+        # clean last chunk
+        self.reset_chunk()
+
+        # reset label
+        self.date = datetime.datetime.now()
+        self.label = self.date.strftime('%Y%m%d_%H%M%S')
+
+        return []
 
     def process_nav(self):
         self.chunk_yaw.append(self.pos[5])
@@ -182,7 +211,7 @@ class PathMonitor(object):
             # chunk variance rejection
             if sigma > self.phi_sigma * 1.5:
                 self.reset_chunk()
-                rospy.loginfo('%s: chuck discarded: sigma: %.3f', self.name, np.rad2deg(sigma))
+                rospy.loginfo('%s: chunk discarded: sigma: %.3f', self.name, np.rad2deg(sigma))
                 return
 
             # update odometer and energy meter
@@ -247,29 +276,30 @@ class PathMonitor(object):
         self.pub_map_spd.publish(fa)
 
 
-def save_maps(pm, steps=20, label='now', **kwargs):
+def save_maps(pm, steps=20, **kwargs):
     # http://stackoverflow.com/questions/9071084/polar-contour-plot-in-matplotlib-best-modern-way-to-do-it
     # generate theta axis
     th = np.linspace(pm.phi_edges[0], pm.phi_edges[-1], steps * pm.n_bins)
+    label = pm.label
 
     # estimated ejm
     m = np.copy(pm.est_ejm)
     r = m.reshape((-1, 1)).repeat(steps, axis=1).flatten()
-
-    # estimated ejm interpolation
-    tck = sci.interpolate.splrep(pm.phi_bins, m)
-    rint = sci.interpolate.splev(th, tck)
 
     # ejm plot
     fig, ax = plt.subplots(subplot_kw=dict(projection='polar'))
     ax.set_theta_direction(-1)
     ax.set_theta_zero_location('N')
     ax.set_xlabel('Direction (deg)')
-    ax.set_title('Energy Performance vs Direction (cost map)')
+    ax.set_title('Average Energy Usage (J/m) by Direction')
 
     ax.plot(th, r, 'o')
-    ax.plot(th, rint)
     ax.set_rmax(np.max(r) * 1.1)
+
+    # # estimated ejm interpolation
+    # tck = sci.interpolate.splrep(pm.phi_bins, m)
+    # rint = sci.interpolate.splev(th, tck)
+    # ax.plot(th, rint)
 
     try:
         fig.canvas.draw()
@@ -281,20 +311,20 @@ def save_maps(pm, steps=20, label='now', **kwargs):
     m = np.copy(pm.est_spd)
     r = m.reshape((-1, 1)).repeat(steps, axis=1).flatten()
 
-    # estimated spd interpolation
-    tck = sci.interpolate.splrep(pm.phi_bins, m)
-    rint = sci.interpolate.splev(th, tck)
-
     # ejm plot
     fig, ax = plt.subplots(subplot_kw=dict(projection='polar'))
     ax.set_theta_direction(-1)
     ax.set_theta_zero_location('N')
     ax.set_xlabel('Direction (deg)')
-    ax.set_title('Average Cruise Speed vs Direction (cost map)')
+    ax.set_title('Average Cruise Speed (m/s) by Direction')
 
     ax.plot(th, r, 'o')
-    ax.plot(th, rint)
     ax.set_rmax(np.max(r) * 1.1)
+
+    # # estimated spd interpolation
+    # tck = sci.interpolate.splrep(pm.phi_bins, m)
+    # rint = sci.interpolate.splev(th, tck)
+    # ax.plot(th, rint)
 
     try:
         fig.canvas.draw()
@@ -310,9 +340,6 @@ def main():
     rospy.loginfo('%s: initialization ...', rospy.get_name())
 
     # config
-    date = datetime.datetime.now()
-    label = date.strftime('%Y%m%d_%H%M%S')
-
     config = rospy.get_param('saetta/path', {})
     enable_maps = bool(rospy.get_param('~/save_maps', True))
 
@@ -321,7 +348,7 @@ def main():
 
     while not rospy.is_shutdown():
         if enable_maps:
-            save_maps(pm, label=label)
+            save_maps(pm)
 
         rospy.sleep(5.0)
 
