@@ -1,16 +1,30 @@
 #!/bin/bash
-
 # References:
 #	http://answers.ros.org/question/10714/start-and-stop-rosbag-within-a-python-script/
 #	http://stackoverflow.com/questions/3332043/obtaining-pid-of-child-process
 
-# allows communication with children
-trap "kill 0" SIGINT
+# usage
+print_usage() {
+    echo "Usage: $(basename $0).sh <mission_config>"
+    echo "Execute the mission specified in the config file while recording .bag and .csv files."
+    echo ""
+    echo "Mandatory arguments:"
+    echo "  <mission_config>: path to the mission config file (JSON format)"
+}
 
-# store data
-declare -a WATER_SPEED
+# script body
+if [[ ! -n $1 ]]; then
+    print_usage
+    exit 1
+fi
+
+# config
+MISSION="$1"
+OUTPUT="$(pwd)"
 
 # water current speed
+declare -a WATER_SPEED
+
 WATER_SPEED[0]=0.00
 WATER_SPEED[1]=0.10
 WATER_SPEED[2]=0.20
@@ -19,9 +33,14 @@ WATER_SPEED[4]=0.40
 WATER_SPEED[5]=0.50
 WATER_SPEED[6]=0.60
 
-# config
-MISSION="/home/valerio/src/saetta_energy/data/mission_config.json"
-OUTPUT="$(pwd)"
+# allows communication with children
+trap "kill 0" SIGINT
+
+# check mission file
+if [ ! -f $MISSION ]; then
+    echo "Mission file not available: $MISSION"
+    exit 2
+fi
 
 # utils
 function vehicle_reset() {
