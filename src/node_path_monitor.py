@@ -3,30 +3,44 @@
 from __future__ import division
 
 import time
+import datetime
+
 import numpy as np
+import scipy as sci
+import scipy.interpolate
+
 np.set_printoptions(precision=3, suppress=True)
 
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+
+mpl.style.use('bmh')
+mpl.rcParams['figure.figsize'] = (8, 8)
+
+# ros imports
 import rospy
 import roslib
 roslib.load_manifest('saetta_energy')
 
-from vehicle_core.path import trajectory_tools as tt
-
 from auv_msgs.msg import NavSts
-from vehicle_interface.msg import PathRequest, PathStatus
+from vehicle_interface.msg import PathRequest, PathStatus, FloatArrayStamped
 from saetta_energy.msg import EnergyReport, EnergyStatus
 
-
-# config
+# topics
 TOPIC_NAV = 'nav/nav_sts'
 TOPIC_REQ = 'path/request'
 TOPIC_STS = 'path/status'
 TOPIC_PIL = 'pilot/status'
 TOPIC_ENE = 'saetta/report'
 
+TOPIC_MAP_EJM = 'saetta/map/energy'
+TOPIC_MAP_SPD = 'saetta/map/speed'
+
+# states
 S_IDLE = 0
 S_RUNNING = 1
 
+# defaults
 DEFAULT_UPDATE = 2          # secs
 
 
@@ -50,7 +64,7 @@ class PathMonitor(object):
         self.phi_sigma = float(kwargs.get('sigma_phi', np.deg2rad(10.0)))
         self.speed_thresh = float(kwargs.get('speed_thresh', 0.3))
 
-        self.initial_cost = float(kwargs.get('initial_cost', 100.0))
+        self.initial_ejm = float(kwargs.get('initial_ejm', 100.0))
         self.initial_spd = float(kwargs.get('initial_spd', 0.5))
         self.n_samples = int(kwargs.get('n_samples', 10))
 
@@ -60,13 +74,13 @@ class PathMonitor(object):
         self.chunk_yaw = []
         self.chunk_energy = 0.0
         self.chunk_dist = 0.0
-        self.chunk_cost = 0.0
+        self.chunk_ejm = 0.0
         self.chunk_start = 0.0
 
-        self.map_cost = self.initial_cost * np.ones((self.n_bins, self.n_samples))
-        self.map_spd = self.initial_spd * np.ones_like(self.map_cost)
+        self.map_ejm = self.initial_ejm * np.ones((self.n_bins, self.n_samples))
+        self.map_spd = self.initial_spd * np.ones_like(self.map_ejm)
 
-        self.est_cost = self.initial_cost * np.ones(self.n_bins)
+        self.est_ejm = self.initial_ejm * np.ones(self.n_bins)
         self.est_spd = self.initial_spd * np.ones(self.n_bins)
 
         # ros interface
@@ -75,15 +89,20 @@ class PathMonitor(object):
         self.sub_nav = rospy.Subscriber(TOPIC_NAV, NavSts, self.handle_nav, queue_size=10)
         self.sub_ene = rospy.Subscriber(TOPIC_ENE, EnergyReport, self.handle_energy, queue_size=10)
 
+        # maps interface
+        self.pub_map_ejm = rospy.Publisher(TOPIC_MAP_EJM, FloatArrayStamped, queue_size=10, latch=True)
+        self.pub_map_spd = rospy.Publisher(TOPIC_MAP_SPD, FloatArrayStamped, queue_size=10, latch=True)
+
         # timers
         self.t_upd = rospy.Timer(rospy.Duration(DEFAULT_UPDATE), self.update_costs)
 
 
     def handle_energy(self, data):
-        self.energy_last = data.energy_used * 3600      # J = Wh * 3600 = Ws = J
+        """parse energy meter (Wh) and converts to Joules (J = Wh * 3600)"""
+        self.energy_last = data.energy_used * 3600
 
     def handle_nav(self, data):
-        # parse navigation data
+        """parse navigation data and update virtual odometer"""
         self.pos = np.array([
             data.position.north,
             data.position.east,
@@ -114,9 +133,6 @@ class PathMonitor(object):
 
     def handle_request(self, data):
         if data.command == PathRequest.CMD_PATH:
-            # pre-analysis
-            #self._pre_analyse_path(data)
-
             # init chunk
             self.chunk_yaw = []
             self.distance_travelled = 0.0
@@ -133,9 +149,6 @@ class PathMonitor(object):
         if data.path_status in (PathStatus.PATH_IDLE, PathStatus.PATH_RUNNING):
             return
         elif data.path_status in (PathStatus.PATH_COMPLETED):
-            # post-analysis
-            #self._post_analyse_path(data)
-
             # reset state
             self.state = S_IDLE
         else:
@@ -178,7 +191,7 @@ class PathMonitor(object):
 
             # chunk metrics
             self.chunk_duration = time.time() - self.chunk_start
-            self.chunk_cost = self.chunk_energy / self.chunk_dist
+            self.chunk_ejm = self.chunk_energy / self.chunk_dist
             self.chunk_spd = self.chunk_dist / self.chunk_duration
 
             # chunk speed rejection
@@ -197,14 +210,14 @@ class PathMonitor(object):
                 return
 
             # map roll
-            self.map_cost[self.chunk_bin, :] = np.roll(self.map_cost[self.chunk_bin, :], -1)
+            self.map_ejm[self.chunk_bin, :] = np.roll(self.map_ejm[self.chunk_bin, :], -1)
             self.map_spd[self.chunk_bin, :] = np.roll(self.map_spd[self.chunk_bin, :], -1)
 
             # map update
-            self.map_cost[self.chunk_bin, -1] = self.chunk_cost
+            self.map_ejm[self.chunk_bin, -1] = self.chunk_ejm
             self.map_spd[self.chunk_bin, -1] = self.chunk_spd
 
-            rospy.loginfo('%s: chuck update: bin: %d, cost: %.3f, spd: %.3f', self.name, self.chunk_bin, self.chunk_cost, self.chunk_spd)
+            rospy.loginfo('%s: chuck update: bin: %d, ejm: %.3f, spd: %.3f', self.name, self.chunk_bin, self.chunk_ejm, self.chunk_spd)
             self.reset_chunk()
 
 
@@ -215,91 +228,102 @@ class PathMonitor(object):
         self.chunk_yaw = []
 
     def update_costs(self, event=None):
+        # exponential weights
         weights = np.exp(np.linspace(0, 1, self.n_samples)) / np.exp(1)
 
-        self.est_cost = np.average(self.map_cost, weights=weights, axis=1).flatten()
+        # weighted average
+        self.est_ejm = np.average(self.map_ejm, weights=weights, axis=1).flatten()
         self.est_spd = np.average(self.map_spd, weights=weights, axis=1).flatten()
 
-    # def _pre_analyse_path(self, data):
-    #     wps = np.array([p.values for p in data.points])
-    #     wps = np.r_[np.atleast_2d(self.pos), wps]
-    #
-    #     orientations = []
-    #
-    #     for n in xrange(1, wps.shape[0]):
-    #         cy = tt.calculate_orientation(wps[n-1, :], wps[n, :])
-    #         orientations.append(cy)
-    #
-    #     self.path_yaw_mean = np.mean(orientations)
-    #     self.path_yaw_std = np.std(orientations)
-    #     self.path_energy_start = np.copy(self.energy_last)
-    #     self.path_time_start = time.time()
-    #
-    #     rospy.loginfo('%s: path: yaw_m: %.3f, yaw_std: %.3f' % (
-    #         self.name, np.rad2deg(self.path_yaw_mean), np.rad2deg(self.path_yaw_std)
-    #     ))
-    #
-    # def _post_analyse_path(self, data):
-    #     self.path_energy_end = np.copy(self.energy_last)
-    #     self.path_time_end = time.time()
-    #
-    #     self.path_id = data.path_id
-    #     self.path_length = data.distance_completed
-    #     self.path_speed = data.speed_average
-    #     self.path_energy_cost = self.path_energy_end - self.path_energy_start
-    #     self.path_duration = data.time_elapsed
-    #     self.path_energy_metric = self.path_energy_cost / self.path_length
-    #
-    #     rospy.loginfo('%s: path %d, time: %.3f, energy: %.3f' % (
-    #         self.name, self.path_id, self.path_duration, self.path_energy_cost
-    #     ))
+        # broadcast estimations
+        fa = FloatArrayStamped()
+        fa.header.stamp = rospy.Time.now()
+        fa.values = self.est_ejm
+        self.pub_map_ejm.publish(fa)
+
+        fa = FloatArrayStamped()
+        fa.header.stamp = rospy.Time.now()
+        fa.values = self.est_spd
+        self.pub_map_spd.publish(fa)
+
+
+def save_maps(pm, steps=20, label='now', **kwargs):
+    # http://stackoverflow.com/questions/9071084/polar-contour-plot-in-matplotlib-best-modern-way-to-do-it
+    # generate theta axis
+    th = np.linspace(pm.phi_edges[0], pm.phi_edges[-1], steps * pm.n_bins)
+
+    # estimated ejm
+    m = np.copy(pm.est_ejm)
+    r = m.reshape((-1, 1)).repeat(steps, axis=1).flatten()
+
+    # estimated ejm interpolation
+    tck = sci.interpolate.splrep(pm.phi_bins, m)
+    rint = sci.interpolate.splev(th, tck)
+
+    # ejm plot
+    fig, ax = plt.subplots(subplot_kw=dict(projection='polar'))
+    ax.set_theta_direction(-1)
+    ax.set_theta_zero_location('N')
+    ax.set_xlabel('Direction (deg)')
+    ax.set_title('Energy Performance vs Direction (cost map)')
+
+    ax.plot(th, r, 'o')
+    ax.plot(th, rint)
+    ax.set_rmax(np.max(r) * 1.1)
+
+    try:
+        fig.canvas.draw()
+        fig.savefig('/tmp/map_ejm_{}.png'.format(label), dpi=90)
+    except Exception as e:
+        rospy.logwarn('%s: cannot save map:\n%s', rospy.get_name(), e)
+
+    # estimated spd
+    m = np.copy(pm.est_spd)
+    r = m.reshape((-1, 1)).repeat(steps, axis=1).flatten()
+
+    # estimated spd interpolation
+    tck = sci.interpolate.splrep(pm.phi_bins, m)
+    rint = sci.interpolate.splev(th, tck)
+
+    # ejm plot
+    fig, ax = plt.subplots(subplot_kw=dict(projection='polar'))
+    ax.set_theta_direction(-1)
+    ax.set_theta_zero_location('N')
+    ax.set_xlabel('Direction (deg)')
+    ax.set_title('Average Cruise Speed vs Direction (cost map)')
+
+    ax.plot(th, r, 'o')
+    ax.plot(th, rint)
+    ax.set_rmax(np.max(r) * 1.1)
+
+    try:
+        fig.canvas.draw()
+        fig.savefig('/tmp/map_spd_{}.png'.format(label), dpi=90)
+    except Exception as e:
+        rospy.logwarn('%s: cannot save map:\n%s', rospy.get_name(), e)
+
+    # clean plots
+    plt.close('all')
 
 def main():
     rospy.init_node('path_monitor')
-    pm = PathMonitor()
+    rospy.loginfo('%s: initialization ...', rospy.get_name())
 
-    import matplotlib as mpl
-    import matplotlib.pyplot as plt
+    # config
+    date = datetime.datetime.now()
+    label = date.strftime('%Y%m%d_%H%M%S')
 
-    import scipy as sci
-    import scipy.interpolate
+    config = rospy.get_param('saetta/path', {})
+    enable_maps = bool(rospy.get_param('~/save_maps', True))
 
-    mpl.style.use('bmh')
-    mpl.rcParams['figure.figsize'] = (8, 8)
-
-    # http://stackoverflow.com/questions/9071084/polar-contour-plot-in-matplotlib-best-modern-way-to-do-it
-    fig, ax = plt.subplots(subplot_kw=dict(projection='polar'))
-
-    steps = 20
-    th = np.linspace(pm.phi_edges[0], pm.phi_edges[-1], steps * pm.n_bins)
+    # init
+    pm = PathMonitor(**config)
 
     while not rospy.is_shutdown():
-        #m = np.mean(pm.map_cost, axis=1).flatten()
+        if enable_maps:
+            save_maps(pm, label=label)
 
-        m = np.copy(pm.est_cost)
-        r = m.reshape((-1, 1)).repeat(steps, axis=1).flatten()
-
-        tck = sci.interpolate.splrep(pm.phi_bins, m)
-        rint = sci.interpolate.splev(th, tck)
-
-        ax.clear()
-        ax.set_theta_direction(-1)
-        ax.set_theta_zero_location('N')
-        ax.set_xlabel('Heading (deg)')
-        #ax.set_ylabel('Energy Cost (J/m)')
-        ax.set_title('Energy Cost vs Heading (map)')
-
-        ax.plot(th, r, 'o')
-        ax.plot(th, rint)
-
-        ax.set_rmax(np.max(r) * 1.1)
-
-        plt.draw()
-        plt.savefig('/tmp/map_cost.png', dpi=90)
-
-        rospy.sleep(2.0)
-
-    # rospy.spin()
+        rospy.sleep(5.0)
 
 if __name__ == '__main__':
     main()

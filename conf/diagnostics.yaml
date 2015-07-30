@@ -1,4 +1,4 @@
-# diagnostics_conf.yaml
+# diagnostics.yaml
 #
 # this is the config file for the node thruster monitor and it can be used to tune the behaviour of the
 # fault mitigation system implemented in the vehicle_core pilot node (thru. the use of dedicated topics)

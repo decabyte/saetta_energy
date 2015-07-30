@@ -1,0 +1,15 @@
+# path_monitor.yaml
+#
+# this is the config file for the node path monitor and it can be used to tune the behaviour of the
+# energy estimation system developed within the saetta package
+saetta:
+  path:
+      n_bins: 8             # int (number of direction bins)
+      n_samples: 10         # int (number of frames to be averaged)
+      t_observe: 10.0       # sec (maximum length of observation chunk)
+
+      sigma_phi: 10.0       # deg
+      speed_thresh: 0.3     # m/s
+
+      initial_ejm: 100.0    # J/m (initial energy performance)
+      initial_spd: 0.50     # m/s (initial average speed)
