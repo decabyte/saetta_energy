@@ -341,7 +341,7 @@ def main():
 
     # config
     config = rospy.get_param('saetta/path', {})
-    enable_maps = bool(rospy.get_param('~/save_maps', True))
+    enable_maps = bool(rospy.get_param('~save_maps', True))
 
     # init
     pm = PathMonitor(**config)
