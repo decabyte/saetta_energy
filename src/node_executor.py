@@ -17,9 +17,9 @@ import rospy
 import roslib
 roslib.load_manifest('saetta_energy')
 
-from vehicle_core.path import trajectory_tools as tt
 from saetta_energy import tsp
 from saetta_energy.utils import id_generator, urlify
+from vehicle_core.path import trajectory_tools as tt
 
 from auv_msgs.msg import NavSts
 from vehicle_interface.msg import PathRequest, PathStatus, PilotStatus, Vector6
@@ -326,14 +326,12 @@ class MissionExecutor(object):
         self.state_mission = MISSION_RUN
 
 
-    def _plan_tsp(self):
-        # select ips to visit
-        ips_labels = [ip for ip, s in self.ips_state.iteritems() if s == 0]
-
+    def _plan_tsp(self, ips_labels):
+        # update costs
         k = len(ips_labels)
         self.ips_costs = np.zeros((k, k))
 
-        # update costs
+        # TODO: update cost function using path_monitor estimates
         for i in xrange(k):
             for j in xrange(k):
                 if i == j:
@@ -344,17 +342,23 @@ class MissionExecutor(object):
 
                 self.ips_costs[i][j] = cost
 
-        # optimal route
-        route, cost, _ = tsp.tsp_problem(ips_labels, self.ips_costs)
+        # ask solver for optimal route
+        route, route_cost, _ = tsp.solve_problem(ips_labels, self.ips_costs)
 
-        rospy.loginfo('%s: found inspection route:\n%s', self.name, route)
+        return route, route_cost
 
     def _plan(self):
-        k = len(self.ips_dict)
-        self.ips_costs = np.zeros((k, k))
+        # select ips to visit
+        ips_labels = [ip for ip, s in self.ips_state.iteritems() if s == 0]
+        ips_labels = sorted(ips_labels, key=lambda x: int(x.split('IP_')[1]))
 
-        # generate standard route (default ordering)
-        route = sorted(self.ips_state.keys(), key=lambda x: int(x.split('IP_')[1]))
+        k = len(ips_labels)
+
+        if not tsp.HAS_GUROBI:
+            rospy.logwarn('%s: tsp solver not available, using naive route ...', self.name)
+
+        route, cost = self._plan_tsp(ips_labels)
+        rospy.loginfo('%s: found inspection route:\n%s', self.name, route)
 
         # generate action sequence
         #   first hover on spot (with los for first IP)
@@ -395,8 +399,8 @@ class MissionExecutor(object):
 
         plan = {
             'ips_count': k,
-            #'ips_label': ips_labels,
-            'ips_state': self.ips_costs.tolist(),
+            'ips_label': ips_labels,
+            'ips_costs': self.ips_costs.tolist(),
             'time': time.time(),
             'actions': self.actions,
         }
