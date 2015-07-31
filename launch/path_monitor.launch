@@ -1,7 +1,7 @@
 <launch>
 
     <!-- args -->
-    <arg name="save_maps" default="true"/>
+    <arg name="save_maps" default="false"/>
 
     <!-- load the config and start the monitor -->
     <rosparam command="delete" param="/saetta/path"/>
