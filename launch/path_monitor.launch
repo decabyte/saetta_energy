@@ -10,7 +10,7 @@
     <include file="$(find saetta_energy)/launch/energy_monitor.launch"/>
 
     <node name="path_monitor" pkg="saetta_energy" type="node_path_monitor.py" args="" output="screen">
-        <param name="save_maps" value="%(arg save_maps)"/>
+        <param name="save_maps" value="$(arg save_maps)"/>
     </node>
 
 </launch>

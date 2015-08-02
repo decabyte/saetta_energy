@@ -22,7 +22,7 @@ from saetta_energy.utils import id_generator, urlify
 from vehicle_core.path import trajectory_tools as tt
 
 from auv_msgs.msg import NavSts
-from vehicle_interface.msg import PathRequest, PathStatus, PilotStatus, Vector6
+from vehicle_interface.msg import PathRequest, PathStatus, PilotStatus, Vector6, FloatArrayStamped
 from vehicle_interface.srv import BooleanService, PathService, PathServiceRequest, PathServiceResponse
 from saetta_energy.msg import EnergyReport, EnergyStatus
 from diagnostic_msgs.msg import KeyValue
@@ -34,6 +34,7 @@ TOPIC_PATH_STS = 'path/status'
 TOPIC_PATH_SRV = 'path/control'
 TOPIC_PILOT_STS = 'pilot/status'
 TOPIC_ENERGY = 'saetta/report'
+TOPIC_MAP_EJM = 'saetta/map/energy'
 
 MISSION_IDLE = 'idle'
 MISSION_RUN = 'run'
@@ -65,7 +66,11 @@ class MissionExecutor(object):
         self.actions = []
 
         # estimation config
-        self.e_perf = 300.0          # navigation cost (J/m)
+        self.n_bins = int(rospy.get_param('saetta/path/n_bins', 8))                 # number of direction bins
+        self.e_perf = float(rospy.get_param('saetta/path/initial_ejm', 100.0))      # navigation cost (J/m)
+        self.map_ejm = self.e_perf * np.ones(self.n_bins)                           # map of navigation costs
+        self.phi_bins = np.linspace(-np.pi, np.pi, self.n_bins)                     # direction bins (edges)
+        self.route_optimization = False
 
         # mission state machine
         self.state_mission = MISSION_IDLE
@@ -80,6 +85,7 @@ class MissionExecutor(object):
         self.action_id = 0
         self.state_action = ACTION_IDLE
         self.last_action = None
+        self.current_action = {}
 
         # vehicle state
         self.pos = np.zeros(6, dtype=np.float64)
@@ -117,6 +123,7 @@ class MissionExecutor(object):
         self.sub_path = rospy.Subscriber(TOPIC_PATH_STS, PathStatus, self.handle_path_status, queue_size=10)
         self.srv_path = rospy.ServiceProxy(TOPIC_PATH_SRV, PathService)
         self.sub_energy = rospy.Subscriber(TOPIC_ENERGY, EnergyReport, self.handle_energy, queue_size=10)
+        self.sub_map_ejm = rospy.Subscriber(TOPIC_MAP_EJM, FloatArrayStamped, self.handle_map_ejm, queue_size=10)
 
         # rate
         self.r_main = rospy.Rate(DEFAULT_RATE)
@@ -169,16 +176,23 @@ class MissionExecutor(object):
     def handle_energy(self, data):
         self.energy_last = data.energy_used
 
+    def handle_map_ejm(self, data):
+        # support change in the map (assuming linear spacing from -pi to pi)
+        self.n_bins = len(data.values)
+        self.phi_bins = np.linspace(-np.pi, np.pi, self.n_bins)
+        self.map_ejm = np.array(data.values)
+
     def state_idle(self):
         pass
 
     def state_run(self):
         if self.state_action == ACTION_IDLE:
             try:
-                current_action = self.actions[self.action_id]
+                # select action
+                self.current_action = self.actions[self.action_id]
 
-                # start a new action
-                self.dispatch_action(current_action)
+                # start action
+                self.dispatch_action(self.current_action)
                 self.state_action = ACTION_RUNNING
             except IndexError:
                 rospy.loginfo('%s: no more action to execute ...', self.name)
@@ -191,9 +205,8 @@ class MissionExecutor(object):
         elif self.state_action == ACTION_ACHIEVED:
             rospy.loginfo('%s: action %d completed, continuing mission ...', self.name, self.action_id)
 
+            self.evaluate_action_result()
             self.state_action = ACTION_IDLE
-            self.action_id += 1
-
         else:
             pass
 
@@ -202,6 +215,39 @@ class MissionExecutor(object):
 
     def state_completed(self):
         rospy.signal_shutdown('mission completed')
+
+
+    def evaluate_action_result(self):
+        if self.current_action['name'] != 'hover':
+            self.action_id += 1
+            return
+
+        try:
+            cips = self.current_action['ips']
+
+            if cips == 'AUV':
+                self.action_id += 1
+                return
+
+            # mark inspection point as visited
+            self.ips_state[cips] = 1
+        except KeyError:
+            self.action_id += 1
+            return
+
+        # calculate remaining inspection points
+        ips_togo = [ip for ip, s in self.ips_state.iteritems() if s == 0]
+        ips_togo = sorted(ips_togo, key=lambda x: int(x.split('IP_')[1]))
+
+        if self.route_optimization and len(ips_togo) > 0:
+            rospy.loginfo('%s: route optimization, remaining inspection points %d', self.name, len(ips_togo))
+
+            # # tsp needs first element as starting point
+            # ips_list = [self.current_action['ips']]
+            # ips_list.extend(ips_togo)
+
+            self._plan(ips_togo)
+            self.action_id = 0
 
     def dispatch_action(self, action):
         rospy.loginfo('%s: dispatching action[%d]: %s', self.name, self.action_id, action['name'])
@@ -212,20 +258,22 @@ class MissionExecutor(object):
         self.energy_start = self.energy_last
 
         if action['name'] == ACT_GOTO:
-            goal = action['params']['pose']
-            poses = []
-            poses.append(goal)
+            params = action['params']
+            goal = params.pop('pose')
+            poses = [goal]
 
+            # reporting
             self.last_los_orient = tt.calculate_orientation(self.pos, goal)
             self.last_los_dist = tt.distance_between(self.pos, goal, spacing_dim=3)
 
-            self.send_path_request(poses)
+            self.send_path_request(poses, **params)
         elif action['name'] == ACT_HOVER:
-            goal = action['params']['pose']
-            poses = []
-            poses.append(goal)
+            params = action['params']
+            goal = params.pop('pose')
+            mode = params.pop('mode', 'simple')
+            poses = [goal]
 
-            self.send_path_request(poses, mode='simple')
+            self.send_path_request(poses, mode=mode, **params)
         else:
             rospy.logerr('%s: unknown action: %s', self.name, action)
 
@@ -307,6 +355,10 @@ class MissionExecutor(object):
 
         # store config
         self.config = config
+        self.route_optimization = bool(config.get('route_optimization', False))
+
+        if self.route_optimization:
+            rospy.loginfo('%s: route optimization active (mission will be replanned at runtime)')
 
         if config.get('output_label', None) is not None:
             self.output_label = config['output_label']
@@ -315,12 +367,19 @@ class MissionExecutor(object):
         # init mission
         self.state_mission = MISSION_IDLE
         self._init_log(self.output_label)
-
-        # initial plan
         self.ips_dict = {'IP_%d' % n: inspection_points[n, :] for n in xrange(inspection_points.shape[0])}
         self.ips_state = {'IP_%d' % n: 0 for n in xrange(inspection_points.shape[0])}
 
-        self._plan()
+        # add virtual inspection point (auv position)
+        self.ips_dict['AUV'] = self.pos
+        self.ips_state['AUV'] = -1
+
+        # select ips to visit
+        ips_labels = [ip for ip, s in self.ips_state.iteritems() if s == 0]
+        ips_labels = sorted(ips_labels, key=lambda x: int(x.split('IP_')[1]))
+
+        # initial plan
+        self._plan(ips_labels)
 
         # change state
         self.state_mission = MISSION_RUN
@@ -331,14 +390,20 @@ class MissionExecutor(object):
         k = len(ips_labels)
         self.ips_costs = np.zeros((k, k))
 
-        # TODO: update cost function using path_monitor estimates
         for i in xrange(k):
             for j in xrange(k):
                 if i == j:
                     continue
 
                 dist = tt.distance_between(self.ips_dict[ips_labels[i]], self.ips_dict[ips_labels[j]], spacing_dim=3)
-                cost = self.e_perf * dist
+
+                yaw_los = tt.calculate_orientation(self.ips_dict[ips_labels[i]], self.ips_dict[ips_labels[j]])
+                yaw_idx = np.digitize([yaw_los], self.phi_bins)[0]
+
+                if yaw_idx > 0:
+                    cost = self.map_ejm[yaw_idx - 1] * dist
+                else:
+                    cost = self.e_perf * dist
 
                 self.ips_costs[i][j] = cost
 
@@ -347,37 +412,42 @@ class MissionExecutor(object):
 
         return route, route_cost
 
-    def _plan(self):
-        # select ips to visit
-        ips_labels = [ip for ip, s in self.ips_state.iteritems() if s == 0]
-        ips_labels = sorted(ips_labels, key=lambda x: int(x.split('IP_')[1]))
-
-        k = len(ips_labels)
-
+    def _plan(self, labels):
         if not tsp.HAS_GUROBI:
             rospy.logwarn('%s: tsp solver not available, using naive route ...', self.name)
 
+        # create inspection list adding vehicle position
+        ips_labels = ['AUV']
+        ips_labels.extend(labels)
+
+        # update vehicle position
+        self.ips_dict['AUV'] = self.pos
+
+        # plan route
         route, cost = self._plan_tsp(ips_labels)
         rospy.loginfo('%s: found inspection route:\n%s', self.name, route)
 
         # generate action sequence
-        #   first hover on spot (with los for first IP)
-        next_pose = np.copy(self.pos)
-        next_pose[5] = tt.calculate_orientation(self.pos, self.ips_dict[route[0]])
+        self.actions = []
 
-        self.actions.append({
-            'name': 'hover',
-            'params': {
-                'pose': next_pose.tolist()
-            }
-        })
+        # # first hover on spot (with los for first IP)
+        # next_pose = np.copy(self.pos)
+        # next_pose[5] = tt.calculate_orientation(self.pos, self.ips_dict[route[0]])
+        #
+        # self.actions.append({
+        #     'name': 'hover',
+        #     'params': {
+        #         'pose': next_pose.tolist()
+        #     }
+        # })
 
+        # second execute the route
         for n in xrange(len(route)):
             self.actions.append({
                 'name': 'goto',
                 'params': {
                     'pose': self.ips_dict[route[n]].tolist()
-                }
+                },
             })
 
             next_pose = np.copy(self.ips_dict[route[n]])
@@ -389,7 +459,8 @@ class MissionExecutor(object):
                 'name': 'hover',
                 'params': {
                     'pose': next_pose.tolist()
-                }
+                },
+                'ips': route[n]
             })
 
         rospy.loginfo('%s: generated action sequence (n=%d)', self.name, len(self.actions))
@@ -398,7 +469,8 @@ class MissionExecutor(object):
         plan_file = os.path.join(self.output_dir, '{}_plan_{}.json'.format(self.output_label, self.plan_id))
 
         plan = {
-            'ips_count': k,
+            'id': self.plan_id,
+            'ips_count': len(ips_labels),
             'ips_label': ips_labels,
             'ips_costs': self.ips_costs.tolist(),
             'time': time.time(),
