@@ -25,13 +25,22 @@ OUTPUT="$(pwd)"
 # water current speed
 declare -a WATER_SPEED
 
-WATER_SPEED[0]=0.00
-WATER_SPEED[1]=0.10
-WATER_SPEED[2]=0.20
-WATER_SPEED[3]=0.30
-WATER_SPEED[4]=0.40
-#WATER_SPEED[5]=0.50
-#WATER_SPEED[6]=0.60
+# fixed currents (value is setting maximum boundary, average is WS / 2)
+WATER_SPEED[0]=0.0  #0.00   (real value)
+WATER_SPEED[1]=0.2  #0.10   (real value)
+WATER_SPEED[2]=0.4  #0.20   (real value)
+WATER_SPEED[3]=0.6  #0.30   (real value)
+WATER_SPEED[4]=0.8  #0.40   (real value)
+WATER_SPEED[5]=1.0  #0.50   (real value)
+
+# slow varying currents (value is setting maximum boundary, average is WS / 2)
+#WATER_SPEED[0]=0.00
+#WATER_SPEED[1]=0.10
+#WATER_SPEED[2]=0.20
+#WATER_SPEED[3]=0.30
+#WATER_SPEED[4]=0.40
+##WATER_SPEED[5]=0.50
+##WATER_SPEED[6]=0.60
 
 # allows communication with children
 trap "kill 0" SIGINT
@@ -104,8 +113,13 @@ do
 	rosparam set /pilot/fault_control false
 	rosparam set /pilot/optimal_allocation false
 
-    # adjust water
+    # adjust water current (fixed)
+    rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.0, 0.0]"
+
+    # adjust water current (slow varying)
     rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.025, 0.001]"
+
+    # adjust water current (high varying)
 	#rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.05, 0.01]"
 
     # reset failure and fault mitigation
