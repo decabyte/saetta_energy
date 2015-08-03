@@ -242,10 +242,6 @@ class MissionExecutor(object):
         if self.route_optimization and len(ips_togo) > 0:
             rospy.loginfo('%s: route optimization, remaining inspection points %d', self.name, len(ips_togo))
 
-            # # tsp needs first element as starting point
-            # ips_list = [self.current_action['ips']]
-            # ips_list.extend(ips_togo)
-
             self._plan(ips_togo)
             self.action_id = 0
 
@@ -430,19 +426,19 @@ class MissionExecutor(object):
         # generate action sequence
         self.actions = []
 
-        # # first hover on spot (with los for first IP)
-        # next_pose = np.copy(self.pos)
-        # next_pose[5] = tt.calculate_orientation(self.pos, self.ips_dict[route[0]])
-        #
-        # self.actions.append({
-        #     'name': 'hover',
-        #     'params': {
-        #         'pose': next_pose.tolist()
-        #     }
-        # })
+        # first hover on spot (with los for first IP)
+        next_pose = np.copy(self.pos)
+        next_pose[5] = tt.calculate_orientation(self.pos, self.ips_dict[route[1]])
+
+        self.actions.append({
+            'name': 'hover',
+            'params': {
+                'pose': next_pose.tolist()
+            }
+        })
 
         # second execute the route
-        for n in xrange(len(route)):
+        for n in xrange(1, len(route)):
             self.actions.append({
                 'name': 'goto',
                 'params': {

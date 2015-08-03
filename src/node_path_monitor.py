@@ -211,7 +211,7 @@ class PathMonitor(object):
             # chunk variance rejection
             if sigma > self.phi_sigma * 1.5:
                 self.reset_chunk()
-                rospy.loginfo('%s: chunk discarded: sigma: %.3f', self.name, np.rad2deg(sigma))
+                rospy.loginfo('%s: chunk: discarded: sigma: %.3f', self.name, np.rad2deg(sigma))
                 return
 
             # update odometer and energy meter
@@ -226,7 +226,7 @@ class PathMonitor(object):
             # chunk speed rejection
             if self.chunk_spd < self.speed_thresh:
                 self.reset_chunk()
-                rospy.loginfo('%s: chuck discarded: spd: %.3f', self.name, self.chunk_spd)
+                rospy.loginfo('%s: chuck: discarded: spd: %.3f', self.name, self.chunk_spd)
                 return
 
             # direction binning (selecting the yaw sector)
@@ -235,7 +235,7 @@ class PathMonitor(object):
 
             if self.chunk_bin < 0:
                 self.reset_chunk()
-                rospy.loginfo('%s: chuck discarded: bin: %d', self.name, self.chunk_bin)
+                rospy.loginfo('%s: chuck: discarded: bin: %d', self.name, self.chunk_bin)
                 return
 
             # map roll
@@ -246,7 +246,7 @@ class PathMonitor(object):
             self.map_ejm[self.chunk_bin, -1] = self.chunk_ejm
             self.map_spd[self.chunk_bin, -1] = self.chunk_spd
 
-            rospy.loginfo('%s: chuck update: bin: %d, ejm: %.3f, spd: %.3f', self.name, self.chunk_bin, self.chunk_ejm, self.chunk_spd)
+            rospy.loginfo('%s: chunk: update bin: %d, ejm: %.3f, spd: %.3f', self.name, self.chunk_bin, self.chunk_ejm, self.chunk_spd)
             self.reset_chunk()
 
 
