@@ -222,20 +222,16 @@ class MissionExecutor(object):
             self.action_id += 1
             return
 
+        # increment action counter
+        self.action_id += 1
+
+        # mark inspection point as visited
         try:
-            cips = self.current_action['ips']
-
-            if cips == 'AUV':
-                self.action_id += 1
-                return
-
-            # mark inspection point as visited
-            self.ips_state[cips] = 1
+            self.ips_state[self.current_action['ips']] = 1
         except KeyError:
-            self.action_id += 1
             return
 
-        # calculate remaining inspection points
+        # (ip achieved) calculate remaining inspection points
         ips_togo = [ip for ip, s in self.ips_state.iteritems() if s == 0]
         ips_togo = sorted(ips_togo, key=lambda x: int(x.split('IP_')[1]))
 
@@ -244,6 +240,7 @@ class MissionExecutor(object):
 
             self._plan(ips_togo)
             self.action_id = 0
+
 
     def dispatch_action(self, action):
         rospy.loginfo('%s: dispatching action[%d]: %s', self.name, self.action_id, action['name'])
@@ -282,6 +279,7 @@ class MissionExecutor(object):
 
         # update status
         self.state_action = status
+
 
     # TEMP: mock the action system with path requests
     def handle_path_status(self, data):
@@ -333,6 +331,7 @@ class MissionExecutor(object):
             self.srv_path.call(command=PathServiceRequest.CMD_RESET)
         except Exception:
             rospy.logerr('%s: unable to communicate with path service ...', self.name)
+
 
     def execute_mission(self, config, **kwargs):
         if self.config is not None:
@@ -404,9 +403,9 @@ class MissionExecutor(object):
                 self.ips_costs[i][j] = cost
 
         # ask solver for optimal route
-        route, route_cost, _ = tsp.solve_problem(ips_labels, self.ips_costs)
+        route, total_cost, _ = tsp.solve_problem(ips_labels, self.ips_costs)
 
-        return route, route_cost
+        return route, total_cost
 
     def _plan(self, labels):
         if not tsp.HAS_GUROBI:
@@ -420,7 +419,7 @@ class MissionExecutor(object):
         self.ips_dict['AUV'] = self.pos
 
         # plan route
-        route, cost = self._plan_tsp(ips_labels)
+        route, total_cost = self._plan_tsp(ips_labels)
         rospy.loginfo('%s: found inspection route:\n%s', self.name, route)
 
         # generate action sequence
@@ -471,6 +470,7 @@ class MissionExecutor(object):
             'ips_costs': self.ips_costs.tolist(),
             'time': time.time(),
             'actions': self.actions,
+            'total_cost': total_cost,
         }
 
         with open(plan_file, 'wt') as plog:
