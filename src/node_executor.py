@@ -235,7 +235,8 @@ class MissionExecutor(object):
         ips_togo = [ip for ip, s in self.ips_state.iteritems() if s == 0]
         ips_togo = sorted(ips_togo, key=lambda x: int(x.split('IP_')[1]))
 
-        if self.route_optimization and len(ips_togo) > 0:
+        # (optimize if there are at least two ips)
+        if self.route_optimization and len(ips_togo) > 1:
             rospy.loginfo('%s: route optimization, remaining inspection points %d', self.name, len(ips_togo))
 
             self._plan(ips_togo)
@@ -403,7 +404,11 @@ class MissionExecutor(object):
                 self.ips_costs[i][j] = cost
 
         # ask solver for optimal route
-        route, total_cost, _ = tsp.solve_problem(ips_labels, self.ips_costs)
+        try:
+            route, total_cost, _ = tsp.solve_problem(ips_labels, self.ips_costs)
+        except:
+            rospy.logwarn('%s: tsp solver error, using naive solver ...')
+            route, total_cost, _ = tsp.naive_solve(ips_labels, self.ips_costs)
 
         return route, total_cost
 
