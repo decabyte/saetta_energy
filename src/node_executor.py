@@ -420,8 +420,6 @@ class MissionExecutor(object):
         # create inspection list adding vehicle position
         ips_labels = ['AUV']
         ips_labels.extend(labels)
-
-        # update vehicle position
         self.ips_dict['AUV'] = self.pos
 
         # plan route
@@ -442,16 +440,18 @@ class MissionExecutor(object):
             }
         })
 
-        # second execute the route
+        # second execute the route (skips the initial piece (going to AUV position)
         for n in xrange(1, len(route)):
+            next_pose = np.copy(self.ips_dict[route[n]])
+            cost = self.ips_costs[ips_labels.index(route[n - 1]), ips_labels.index(route[n])]
+
             self.actions.append({
                 'name': 'goto',
                 'params': {
                     'pose': self.ips_dict[route[n]].tolist()
                 },
+                'cost': cost,
             })
-
-            next_pose = np.copy(self.ips_dict[route[n]])
 
             if n < len(route) - 1:
                 next_pose[5] = tt.calculate_orientation(self.ips_dict[route[n]], self.ips_dict[route[n + 1]])
