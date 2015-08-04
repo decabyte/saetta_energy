@@ -2,6 +2,7 @@
 # References:
 #	http://answers.ros.org/question/10714/start-and-stop-rosbag-within-a-python-script/
 #	http://stackoverflow.com/questions/3332043/obtaining-pid-of-child-process
+#   http://stackoverflow.com/questions/965053/extract-filename-and-extension-in-bash
 
 # usage
 print_usage() {
@@ -19,19 +20,40 @@ if [[ ! -n $1 ]]; then
 fi
 
 # config
-MISSION="$1"
+filename="${1##*/}"
+extension="${filename##*.}"
+name="${filename%.*}"
+
+MISSION=$1
+MISSION_OPT="$(dirname $1)/${name}_opt.$extension"
 OUTPUT="$(pwd)"
+
+echo "Mission configs:"
+echo $MISSION
+echo $MISSION_OPT
+echo ""
+
+# check mission file
+if [ ! -f $MISSION ]; then
+    echo "Mission file not available: $MISSION"
+    exit 2
+fi
+
+if [ ! -f $MISSION_OPT ]; then
+    echo "Mission file not available: $MISSION_OPT"
+    exit 2
+fi
 
 # water current speed
 declare -a WATER_SPEED
 
 # fixed currents (value is setting maximum boundary, average is WS / 2)
-WATER_SPEED[0]=0.00  #0.00   (real value)
+#WATER_SPEED[0]=0.00  #0.00   (real value)
 WATER_SPEED[1]=0.20  #0.10   (real value)
 WATER_SPEED[2]=0.40  #0.20   (real value)
 WATER_SPEED[3]=0.60  #0.30   (real value)
-WATER_SPEED[4]=0.80  #0.40   (real value)
-WATER_SPEED[5]=1.00  #0.50   (real value)
+#WATER_SPEED[4]=0.80  #0.40   (real value)
+#WATER_SPEED[5]=1.00  #0.50   (real value)
 
 # slow varying currents (value is setting maximum boundary, average is WS / 2)
 #WATER_SPEED[0]=0.00
@@ -44,12 +66,6 @@ WATER_SPEED[5]=1.00  #0.50   (real value)
 
 # allows communication with children
 trap "kill 0" SIGINT
-
-# check mission file
-if [ ! -f $MISSION ]; then
-    echo "Mission file not available: $MISSION"
-    exit 2
-fi
 
 # utils
 function vehicle_reset() {
@@ -131,6 +147,46 @@ do
 
     echo "starting ${TAG}_${index} navigation experiment"
     rosrun saetta_energy node_executor.py --output="$OUTPUT" --label="${TAG}_${WS}" $MISSION
+    echo "${TAG} run[$index]: exit code $?"
+
+    # disable recording
+    sleep 1
+   	recording_stop
+
+    # reset the vehicle state
+    vehicle_reset
+done
+
+
+## OPTIMAL STANDARD RUNS ##
+for index in ${!WATER_SPEED[*]}
+do
+	# run config
+	WS="${WATER_SPEED[$index]}"
+	TAG="optimal"
+
+	# reset configuration
+	rosparam set /pilot/fault_control false
+	rosparam set /pilot/optimal_allocation false
+
+    # adjust water current (fixed)
+    rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.0, 0.0]"
+
+    # adjust water current (slow varying)
+    #rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.025, 0.001]"
+
+    # adjust water current (high varying)
+	#rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.05, 0.01]"
+
+    # reset failure and fault mitigation
+	# rosrun vehicle_core fault_clear.sh
+	# rosservice call /pilot/fault_control "request: false"
+
+    # enable recording
+    recording_start $TAG $WS
+
+    echo "starting ${TAG}_${index} navigation experiment"
+    rosrun saetta_energy node_executor.py --output="$OUTPUT" --label="${TAG}_${WS}" $MISSION_OPT
     echo "${TAG} run[$index]: exit code $?"
 
     # disable recording
