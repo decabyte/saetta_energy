@@ -8,7 +8,7 @@ import traceback
 import argparse
 import json
 import time
-import collections
+import copy
 
 import numpy as np
 np.set_printoptions(precision=3, suppress=True)
@@ -145,11 +145,6 @@ class MissionExecutor(object):
                 mlog.write('id,action,label,time_start,time_end,time_elapsed,energy_used,direction,distance\n')
 
     def _write_log(self, label, action):
-        # record action stats
-        self.time_end = time.time()
-        self.time_elapsed = self.time_end - self.time_start
-        self.energy_used = self.energy_last - self.energy_start
-
         extra = '0.0,0.0'
 
         if action['name'] == ACT_GOTO:
@@ -237,8 +232,15 @@ class MissionExecutor(object):
         # mark inspection point as visited
         try:
             self.ips_state[self.current_action['ips']] = 1
+            self.hop_counter += 1
         except KeyError:
             return
+
+        # evaluate residuals
+        hops_costs, _ = self._calculate_cost_route(self.route[self.hop_counter:])
+        prev_cost = self.route_cost_hops[self.hop_counter:]
+
+        rospy.loginfo('%s: residual updates:\n  prev: %s\n  new: %s', self.name, sum(prev_cost), sum(hops_costs))
 
         # (ip achieved) calculate remaining inspection points
         ips_togo = [ip for ip, s in self.ips_state.iteritems() if s == 0]
@@ -283,6 +285,11 @@ class MissionExecutor(object):
     def handle_feedback(self, status):
         # if self.state_action in (ACTION_RUNNING, ACTION_IDLE):
         #     return
+
+        # update action stats
+        self.time_end = time.time()
+        self.time_elapsed = self.time_end - self.time_start
+        self.energy_used = self.energy_last - self.energy_start
 
         # record action stats
         self._write_log(self.output_label, self.last_action)
@@ -372,6 +379,8 @@ class MissionExecutor(object):
         # init mission
         self.state_mission = MISSION_IDLE
         self._init_log(self.output_label)
+
+        # insert inspection points
         self.ips_dict = {'IP_%d' % n: inspection_points[n, :] for n in xrange(inspection_points.shape[0])}
         self.ips_state = {'IP_%d' % n: 0 for n in xrange(inspection_points.shape[0])}
 
@@ -390,57 +399,91 @@ class MissionExecutor(object):
         self.state_mission = MISSION_RUN
 
 
-    def _plan_tsp(self, ips_labels):
-        # update costs
-        k = len(ips_labels)
-        self.ips_costs = np.zeros((k, k))
+    def _calculate_cost_hop(self, wp_a, wp_b):
+        dist = tt.distance_between(wp_a, wp_b, spacing_dim=3)
 
+        yaw_los = tt.calculate_orientation(wp_a, wp_b)
+        yaw_idx = np.digitize([yaw_los], self.phi_edges)[0] - 1
+
+        if yaw_idx >= 0 and yaw_idx < self.n_bins:
+            cost = self.map_ejm[yaw_idx] * dist
+        else:
+            rospy.logwarn('%s: binning failed, using default cost (yaw_los: %.2f, yaw_idx: %d, n_bins: %d)', self.name, yaw_los, yaw_idx, self.n_bins)
+            cost = self.e_perf * dist
+
+        return cost
+
+    def _calculate_cost_route(self, route):
+        cost_hops = []
+
+        for n in xrange(len(route)):
+            wp_a = self.ips_dict[route[n - 1]]
+            wp_b = self.ips_dict[route[n]]
+
+            cost_hops.append(self._calculate_cost_hop(wp_a, wp_b))
+
+        return cost_hops, sum(cost_hops)
+
+
+    def _plan_tsp(self, labels):
+        if not tsp.HAS_GUROBI:
+            rospy.logwarn('%s: tsp solver not available, using naive route ...', self.name)
+
+        # update vehicle position
+        self.ips_dict['AUV'] = self.pos
+
+        # create inspection list
+        ips_labels = ['AUV']
+        ips_labels.extend(labels)
+
+        k = len(ips_labels)
+        ips_costs = np.zeros((k, k))
+
+        # update travel costs
         for i in xrange(k):
             for j in xrange(k):
                 if i == j:
                     continue
 
-                dist = tt.distance_between(self.ips_dict[ips_labels[i]], self.ips_dict[ips_labels[j]], spacing_dim=3)
+                ips_costs[i][j] = self._calculate_cost_hop(self.ips_dict[ips_labels[i]], self.ips_dict[ips_labels[j]])
 
-                yaw_los = tt.calculate_orientation(self.ips_dict[ips_labels[i]], self.ips_dict[ips_labels[j]])
-                yaw_idx = np.digitize([yaw_los], self.phi_edges)[0] - 1
-
-                if yaw_idx >= 0 and yaw_idx < self.n_bins:
-                    cost = self.map_ejm[yaw_idx] * dist
-                else:
-                    rospy.logwarn('%s: binning failed, using default cost (yaw_los: %.2f, yaw_idx: %d, n_bins: %d)', self.name, yaw_los, yaw_idx, self.n_bins)
-                    cost = self.e_perf * dist
-
-                self.ips_costs[i][j] = cost
-
-        # ask solver for optimal route
         try:
-            route, total_cost, _ = tsp.solve_problem(ips_labels, self.ips_costs)
+            # ask solver for optimal route
+            route, tsp_cost, _ = tsp.solve_problem(ips_labels, ips_costs)
         except:
             rospy.logwarn('%s: tsp solver error, using naive solver ...')
-            route, total_cost, _ = tsp.naive_solve(ips_labels, self.ips_costs)
+            route, tsp_cost, _ = tsp.naive_solve(ips_labels, ips_costs)
 
-        return route, total_cost
+        # intermediate costs
+        cost_hops = []
+
+        for n in xrange(len(route)):
+            i = ips_labels.index(route[n - 1])
+            j = ips_labels.index(route[n])
+
+            cost_hops.append(ips_costs[i][j])
+
+        # remove initial virtual point
+        route = route[1:]
+        cost_hops = cost_hops[1:]
+        cost_total = np.sum(cost_hops)
+
+        return route, cost_hops, cost_total
 
     def _plan(self, labels):
-        if not tsp.HAS_GUROBI:
-            rospy.logwarn('%s: tsp solver not available, using naive route ...', self.name)
-
-        # create inspection list adding vehicle position
-        ips_labels = ['AUV']
-        ips_labels.extend(labels)
-        self.ips_dict['AUV'] = self.pos
-
         # plan route
-        route, total_cost = self._plan_tsp(ips_labels)
-        rospy.loginfo('%s: found inspection route:\n%s', self.name, route)
+        self.route, self.route_cost_hops, self.route_cost_tot = self._plan_tsp(labels)
+        rospy.loginfo('%s: found inspection route:\n%s', self.name, self.route)
+
+        # route monitor
+        self.hop_counter = 0
 
         # generate action sequence
         self.actions = []
 
         # first hover on spot (with los for first IP)
         next_pose = np.copy(self.pos)
-        next_pose[5] = tt.calculate_orientation(self.pos, self.ips_dict[route[1]])
+        next_pose[5] = tt.calculate_orientation(self.pos, self.ips_dict[self.route[0]])
 
         self.actions.append({
             'name': 'hover',
@@ -450,27 +493,26 @@ class MissionExecutor(object):
         })
 
         # second execute the route (skips the initial piece (going to AUV position)
-        for n in xrange(1, len(route)):
-            next_pose = np.copy(self.ips_dict[route[n]])
-            cost = self.ips_costs[ips_labels.index(route[n - 1]), ips_labels.index(route[n])]
+        for n in xrange(len(self.route)):
+            next_pose = np.copy(self.ips_dict[self.route[n]])
 
             self.actions.append({
                 'name': 'goto',
                 'params': {
-                    'pose': self.ips_dict[route[n]].tolist()
+                    'pose': self.ips_dict[self.route[n]].tolist()
                 },
-                'cost': cost,
+                'cost': self.route_cost_hops[n],
             })
 
-            if n < len(route) - 1:
-                next_pose[5] = tt.calculate_orientation(self.ips_dict[route[n]], self.ips_dict[route[n + 1]])
+            if n < len(self.route) - 1:
+                next_pose[5] = tt.calculate_orientation(self.ips_dict[self.route[n]], self.ips_dict[self.route[n + 1]])
 
             self.actions.append({
                 'name': 'hover',
                 'params': {
                     'pose': next_pose.tolist()
                 },
-                'ips': route[n]
+                'ips': self.route[n]
             })
 
         rospy.loginfo('%s: generated action sequence (n=%d)', self.name, len(self.actions))
@@ -480,13 +522,12 @@ class MissionExecutor(object):
 
         plan = {
             'id': self.plan_id,
-            'ips_count': len(ips_labels),
-            'ips_label': ips_labels,
-            'ips_costs': self.ips_costs.tolist(),
             'time': time.time(),
+            'ips_count': len(labels),
+            'route': self.route,
+            'cost_hops': self.route_cost_hops,
+            'cost_total': self.route_cost_tot,
             'actions': self.actions,
-            'route': route,
-            'total_cost': total_cost,
         }
 
         with open(plan_file, 'wt') as plog:

@@ -264,6 +264,13 @@ class PathMonitor(object):
         self.est_ejm = np.average(self.map_ejm, weights=weights, axis=1).flatten()
         self.est_spd = np.average(self.map_spd, weights=weights, axis=1).flatten()
 
+        # map time roll
+        self.map_ejm[:, 0] = self.map_ejm[:, -1]
+        self.map_spd[:, 0] = self.map_spd[:, -1]
+
+        self.map_ejm = np.roll(self.map_ejm, -1, axis=1)
+        self.map_spd = np.roll(self.map_spd, -1, axis=1)
+
         # broadcast estimations
         fa = FloatArrayStamped()
         fa.header.stamp = rospy.Time.now()
