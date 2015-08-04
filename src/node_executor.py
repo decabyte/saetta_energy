@@ -67,10 +67,14 @@ class MissionExecutor(object):
 
         # estimation config
         self.n_bins = int(rospy.get_param('saetta/path/n_bins', 8))                 # number of direction bins
-        self.e_perf = float(rospy.get_param('saetta/path/initial_ejm', 100.0))      # navigation cost (J/m)
+        self.e_perf = float(rospy.get_param('saetta/path/initial_ejm', 70.0))       # navigation cost (J/m)
         self.map_ejm = self.e_perf * np.ones(self.n_bins)                           # map of navigation costs
-        self.phi_edges = np.linspace(-np.pi, np.pi, self.n_bins + 1)                # direction bins (edges)
         self.route_optimization = False
+
+        # update bins and add some slack
+        self.phi_edges = np.linspace(-np.pi, np.pi, self.n_bins + 1)                # direction bins (edges)
+        self.phi_edges[0] -= 0.001
+        self.phi_edges[-1] += 0.001
 
         # mission state machine
         self.state_mission = MISSION_IDLE
@@ -179,8 +183,13 @@ class MissionExecutor(object):
     def handle_map_ejm(self, data):
         # support change in the map (assuming linear spacing from -pi to pi)
         self.n_bins = len(data.values)
-        self.phi_edges = np.linspace(-np.pi, np.pi, self.n_bins + 1)
         self.map_ejm = np.array(data.values)
+
+        # update bins and add some slack
+        self.phi_edges = np.linspace(-np.pi, np.pi, self.n_bins + 1)
+        self.phi_edges[0] -= 0.001
+        self.phi_edges[-1] += 0.001
+
 
     def state_idle(self):
         pass
