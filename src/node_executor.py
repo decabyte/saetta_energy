@@ -179,7 +179,7 @@ class MissionExecutor(object):
     def handle_map_ejm(self, data):
         # support change in the map (assuming linear spacing from -pi to pi)
         self.n_bins = len(data.values)
-        self.phi_edges = np.linspace(-np.pi, np.pi, self.n_bins)
+        self.phi_edges = np.linspace(-np.pi, np.pi, self.n_bins + 1)
         self.map_ejm = np.array(data.values)
 
     def state_idle(self):
@@ -399,6 +399,7 @@ class MissionExecutor(object):
                 if yaw_idx > 0:
                     cost = self.map_ejm[yaw_idx - 1] * dist
                 else:
+                    rospy.logwarn('%s: binning failed, using default cost ...', self.name)
                     cost = self.e_perf * dist
 
                 self.ips_costs[i][j] = cost
