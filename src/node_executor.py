@@ -69,7 +69,7 @@ class MissionExecutor(object):
         self.n_bins = int(rospy.get_param('saetta/path/n_bins', 8))                 # number of direction bins
         self.e_perf = float(rospy.get_param('saetta/path/initial_ejm', 100.0))      # navigation cost (J/m)
         self.map_ejm = self.e_perf * np.ones(self.n_bins)                           # map of navigation costs
-        self.phi_bins = np.linspace(-np.pi, np.pi, self.n_bins)                     # direction bins (edges)
+        self.phi_edges = np.linspace(-np.pi, np.pi, self.n_bins + 1)                # direction bins (edges)
         self.route_optimization = False
 
         # mission state machine
@@ -179,7 +179,7 @@ class MissionExecutor(object):
     def handle_map_ejm(self, data):
         # support change in the map (assuming linear spacing from -pi to pi)
         self.n_bins = len(data.values)
-        self.phi_bins = np.linspace(-np.pi, np.pi, self.n_bins)
+        self.phi_edges = np.linspace(-np.pi, np.pi, self.n_bins)
         self.map_ejm = np.array(data.values)
 
     def state_idle(self):
@@ -394,7 +394,7 @@ class MissionExecutor(object):
                 dist = tt.distance_between(self.ips_dict[ips_labels[i]], self.ips_dict[ips_labels[j]], spacing_dim=3)
 
                 yaw_los = tt.calculate_orientation(self.ips_dict[ips_labels[i]], self.ips_dict[ips_labels[j]])
-                yaw_idx = np.digitize([yaw_los], self.phi_bins)[0]
+                yaw_idx = np.digitize([yaw_los], self.phi_edges)[0]
 
                 if yaw_idx > 0:
                     cost = self.map_ejm[yaw_idx - 1] * dist
@@ -475,6 +475,7 @@ class MissionExecutor(object):
             'ips_costs': self.ips_costs.tolist(),
             'time': time.time(),
             'actions': self.actions,
+            'route': route,
             'total_cost': total_cost,
         }
 
