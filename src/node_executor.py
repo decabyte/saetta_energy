@@ -396,10 +396,10 @@ class MissionExecutor(object):
                 yaw_los = tt.calculate_orientation(self.ips_dict[ips_labels[i]], self.ips_dict[ips_labels[j]])
                 yaw_idx = np.digitize([yaw_los], self.phi_edges)[0]
 
-                if yaw_idx > 0:
+                if yaw_idx > 0 and yaw_idx < self.n_bins:
                     cost = self.map_ejm[yaw_idx - 1] * dist
                 else:
-                    rospy.logwarn('%s: binning failed, using default cost ...', self.name)
+                    rospy.logwarn('%s: binning failed, using default cost (yaw_los: %.2f, yaw_idx: %d)', self.name, yaw_los, yaw_idx)
                     cost = self.e_perf * dist
 
                 self.ips_costs[i][j] = cost
