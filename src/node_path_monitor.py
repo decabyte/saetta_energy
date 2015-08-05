@@ -2,8 +2,11 @@
 # -*- coding: utf-8 -*-
 from __future__ import division
 
+import os
+import json
 import time
 import datetime
+import collections
 
 import numpy as np
 import scipy as sci
@@ -24,6 +27,7 @@ roslib.load_manifest('saetta_energy')
 
 from auv_msgs.msg import NavSts
 from vehicle_interface.msg import PathRequest, PathStatus, FloatArrayStamped
+from vehicle_interface.srv import StringService, BooleanService, BooleanServiceResponse, StringServiceResponse
 from saetta_energy.msg import EnergyReport, EnergyStatus
 from std_srvs.srv import Empty
 
@@ -34,6 +38,9 @@ TOPIC_STS = 'path/status'
 TOPIC_PIL = 'pilot/status'
 TOPIC_ENE = 'saetta/report'
 SRV_RESET = 'saetta/map/reset'
+SRV_DUMP = 'saetta/map/dump'
+SRV_SWITCH = 'saetta/map/switch'
+
 TOPIC_MAP_EJM = 'saetta/map/energy'
 TOPIC_MAP_SPD = 'saetta/map/speed'
 
@@ -42,32 +49,41 @@ S_IDLE = 0
 S_RUNNING = 1
 
 # defaults
-DEFAULT_UPDATE = 2          # secs
+DEFAULT_UPDATE = 5          # secs
 
+
+class CustomEncoder(json.JSONEncoder):
+    """http://stackoverflow.com/questions/8230315/python-sets-are-not-json-serializable"""
+    def default(self, obj):
+        if isinstance(obj, collections.deque):
+            return list(obj)
+
+        return json.JSONEncoder.default(self, obj)
 
 class PathMonitor(object):
-
     def __init__(self, **kwargs):
         self.name = rospy.get_name()
 
         # state
+        self.state = S_IDLE
+        self.switch = True
+
         self.pos = np.zeros(6)
         self.pos_prev = np.zeros(6)
         self.vel = np.zeros(6)
-
-        self.state = S_IDLE
         self.energy_last = 0.0
         self.energy_start = 0.0
         self.distance_travelled = 0.0
 
         self.n_bins = int(kwargs.get('n_bins', 8))
+        self.n_samples = int(kwargs.get('n_samples', 10))
         self.t_observe = float(kwargs.get('t_observe', 10.0))
-        self.phi_sigma = float(kwargs.get('sigma_phi', np.deg2rad(10.0)))
+
+        self.sigma_thresh = float(kwargs.get('sigma_phi', np.deg2rad(10.0)))
         self.speed_thresh = float(kwargs.get('speed_thresh', 0.3))
 
         self.initial_ejm = float(kwargs.get('initial_ejm', 100.0))
         self.initial_spd = float(kwargs.get('initial_spd', 0.5))
-        self.n_samples = int(kwargs.get('n_samples', 10))
 
         self.phi_edges = np.linspace(0, 2 * np.pi, self.n_bins + 1) - np.pi
         self.phi_bins = self.phi_edges[:-1] + ((2 * np.pi / self.n_bins) / 2.0)
@@ -78,11 +94,8 @@ class PathMonitor(object):
         self.chunk_ejm = 0.0
         self.chunk_start = 0.0
 
-        self.map_ejm = self.initial_ejm * np.ones((self.n_bins, self.n_samples))
-        self.map_spd = self.initial_spd * np.ones_like(self.map_ejm)
-
-        self.est_ejm = self.initial_ejm * np.ones(self.n_bins)
-        self.est_spd = self.initial_spd * np.ones(self.n_bins)
+        # init maps
+        self._init_map()
 
         # ros interface
         self.sub_req = rospy.Subscriber(TOPIC_REQ, PathRequest, self.handle_request, queue_size=10)
@@ -94,15 +107,79 @@ class PathMonitor(object):
         self.pub_map_ejm = rospy.Publisher(TOPIC_MAP_EJM, FloatArrayStamped, queue_size=10, latch=True)
         self.pub_map_spd = rospy.Publisher(TOPIC_MAP_SPD, FloatArrayStamped, queue_size=10, latch=True)
 
-        # reset interface
+        # services
         self.srv_reset = rospy.Service(SRV_RESET, Empty, self.handle_reset)
+        self.srv_dump = rospy.Service(SRV_DUMP, StringService, self.handle_dump)
+        self.srv_switch = rospy.Service(SRV_SWITCH, BooleanService, self.handle_switch)
 
         # timers
-        self.t_upd = rospy.Timer(rospy.Duration(DEFAULT_UPDATE), self.update_costs)
+        self.t_upd = rospy.Timer(rospy.Duration(DEFAULT_UPDATE), self.publish_estimations)
 
-        # (temp) keep tracks of resets
+
+    def _init_map(self):
+        # initialize map
+        self.map_ejm = []
+        self.map_spd = []
+
+        for n in xrange(self.n_bins):
+            self.map_ejm.append(collections.deque([self.initial_ejm]))
+            self.map_spd.append(collections.deque([self.initial_spd]))
+
+        # initialize estimations
+        self.est_ejm = self.initial_ejm * np.ones(self.n_bins)
+        self.est_spd = self.initial_spd * np.ones(self.n_bins)
+
+        # clean last chunk
+        self._reset_chunk()
+
+        # reset label
         self.date = datetime.datetime.now()
         self.label = self.date.strftime('%Y%m%d_%H%M%S')
+
+    def _reset_chunk(self):
+        self.distance_travelled = 0.0
+        self.energy_start = np.copy(self.energy_last)
+        self.chunk_start = time.time()
+        self.chunk_yaw = []
+
+
+    def handle_dump(self, data):
+        user_path = data.request
+        dir_path = os.path.dirname(user_path)
+
+        if user_path == '' or not os.path.exists(dir_path):
+            return StringServiceResponse(result=False, response=data.request)
+
+        out = {
+            'n_bins': self.n_bins,
+            't_observe': self.t_observe,
+            'map_ejm': self.map_ejm,
+            'map_spd': self.map_spd,
+        }
+
+        with open(user_path, 'wt') as jf:
+            json.dump(out, jf, indent=2, cls=CustomEncoder)
+
+        return StringServiceResponse(result=True, response=user_path)
+
+    def handle_switch(self, data):
+        self.switch = data.request
+
+        # discard last measurement if disabled
+        if not self.switch:
+            self.state = S_IDLE
+            self._reset_chunk()
+
+        rospy.logwarn('%s: resetting status: %s', self.name, self.switch)
+        return BooleanServiceResponse(response=self.switch)
+
+    def handle_reset(self, data=None):
+        # disable and clean maps
+        self.state = S_IDLE
+        self._init_map()
+
+        rospy.logwarn('%s: resetting estimations and maps ...', self.name)
+        return []
 
 
     def handle_energy(self, data):
@@ -129,7 +206,7 @@ class PathMonitor(object):
             data.orientation_rate.yaw
         ])
 
-        if self.state == S_RUNNING:
+        if self.state == S_RUNNING and self.switch:
             # virtual odometer
             self.distance_travelled += np.linalg.norm(self.pos[0:3] - self.pos_prev[0:3])
 
@@ -138,6 +215,7 @@ class PathMonitor(object):
 
         # save previous nav state
         self.pos_prev = self.pos
+
 
     def handle_request(self, data):
         if data.command == PathRequest.CMD_PATH:
@@ -166,33 +244,12 @@ class PathMonitor(object):
             # reset state
             self.state = S_IDLE
 
-    def handle_reset(self, req):
-        rospy.logwarn('%s: resetting estimations and maps ...', self.name)
-
-        # disable if running
-        self.state = S_IDLE
-
-        # clean initial belief
-        self.map_ejm = self.initial_ejm * np.ones((self.n_bins, self.n_samples))
-        self.map_spd = self.initial_spd * np.ones_like(self.map_ejm)
-
-        self.est_ejm = self.initial_ejm * np.ones(self.n_bins)
-        self.est_spd = self.initial_spd * np.ones(self.n_bins)
-
-        # clean last chunk
-        self.reset_chunk()
-
-        # reset label
-        self.date = datetime.datetime.now()
-        self.label = self.date.strftime('%Y%m%d_%H%M%S')
-
-        return []
 
     def process_nav(self):
         self.chunk_yaw.append(self.pos[5])
         time_delta = time.time() - self.chunk_start
 
-        if np.std(self.chunk_yaw) > self.phi_sigma or time_delta > self.t_observe:
+        if np.std(self.chunk_yaw) > self.sigma_thresh or time_delta > self.t_observe:
             # statistical analysis
             #   select the most frequent yaw value from modes (aka the mode)
             mu = np.mean(self.chunk_yaw)
@@ -209,8 +266,8 @@ class PathMonitor(object):
             )
 
             # chunk variance rejection
-            if sigma > self.phi_sigma * 1.5:
-                self.reset_chunk()
+            if sigma > self.sigma_thresh * 1.5:
+                self._reset_chunk()
                 rospy.loginfo('%s: chunk: discarded: sigma: %.3f', self.name, np.rad2deg(sigma))
                 return
 
@@ -225,7 +282,7 @@ class PathMonitor(object):
 
             # chunk speed rejection
             if self.chunk_spd < self.speed_thresh:
-                self.reset_chunk()
+                self._reset_chunk()
                 rospy.loginfo('%s: chuck: discarded: spd: %.3f', self.name, self.chunk_spd)
                 return
 
@@ -234,44 +291,34 @@ class PathMonitor(object):
             self.chunk_bin = np.digitize([mode], self.phi_edges)[0] - 1
 
             if self.chunk_bin < 0:
-                self.reset_chunk()
+                self._reset_chunk()
                 rospy.loginfo('%s: chuck: discarded: bin: %d', self.name, self.chunk_bin)
                 return
 
-            # map roll
-            self.map_ejm[self.chunk_bin, :] = np.roll(self.map_ejm[self.chunk_bin, :], -1)
-            self.map_spd[self.chunk_bin, :] = np.roll(self.map_spd[self.chunk_bin, :], -1)
-
             # map update
-            self.map_ejm[self.chunk_bin, -1] = self.chunk_ejm
-            self.map_spd[self.chunk_bin, -1] = self.chunk_spd
+            self.map_ejm[self.chunk_bin].append(self.chunk_ejm)
+            self.map_spd[self.chunk_bin].append(self.chunk_spd)
 
             rospy.loginfo('%s: chunk: update bin: %d, ejm: %.3f, spd: %.3f', self.name, self.chunk_bin, self.chunk_ejm, self.chunk_spd)
-            self.reset_chunk()
+            self._reset_chunk()
 
 
-    def reset_chunk(self):
-        self.distance_travelled = 0.0
-        self.energy_start = np.copy(self.energy_last)
-        self.chunk_start = time.time()
-        self.chunk_yaw = []
+    def publish_estimations(self, event=None):
+        # # exponential weights
+        # weights = np.exp(np.linspace(0, 1, self.n_samples)) / np.exp(1)
+        #
+        # # weighted average
+        # self.est_ejm = np.average(self.map_ejm, weights=weights, axis=1).flatten()
+        # self.est_spd = np.average(self.map_spd, weights=weights, axis=1).flatten()
 
-    def update_costs(self, event=None):
-        # exponential weights
-        weights = np.exp(np.linspace(0, 1, self.n_samples)) / np.exp(1)
+        self.est_ejm = []
+        self.est_spd = []
 
-        # weighted average
-        self.est_ejm = np.average(self.map_ejm, weights=weights, axis=1).flatten()
-        self.est_spd = np.average(self.map_spd, weights=weights, axis=1).flatten()
+        for n in xrange(self.n_bins):
+            self.est_ejm.append(np.median(self.map_ejm[n]).astype(float))
+            self.est_spd.append(np.median(self.map_spd[n]).astype(float))
 
-        # map time roll
-        self.map_ejm[:, 0] = self.map_ejm[:, -1]
-        self.map_spd[:, 0] = self.map_spd[:, -1]
-
-        self.map_ejm = np.roll(self.map_ejm, -1, axis=1)
-        self.map_spd = np.roll(self.map_spd, -1, axis=1)
-
-        # broadcast estimations
+        # ros messages
         fa = FloatArrayStamped()
         fa.header.stamp = rospy.Time.now()
         fa.values = self.est_ejm

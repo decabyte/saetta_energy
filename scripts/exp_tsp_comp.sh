@@ -20,27 +20,17 @@ if [[ ! -n $1 ]]; then
 fi
 
 # config
-filename="${1##*/}"
-extension="${filename##*.}"
-name="${filename%.*}"
-
-MISSION=$1
-MISSION_OPT="$(dirname $1)/${name}_opt.$extension"
 OUTPUT="$(pwd)"
+MISSION=$1
 
-echo "Mission configs:"
-echo $MISSION
-echo $MISSION_OPT
-echo ""
+#filename="${1##*/}"
+#extension="${filename##*.}"
+#name="${filename%.*}"
+#MISSION_OPT="$(dirname $1)/${name}_opt.$extension"
 
 # check mission file
 if [ ! -f $MISSION ]; then
     echo "Mission file not available: $MISSION"
-    exit 2
-fi
-
-if [ ! -f $MISSION_OPT ]; then
-    echo "Mission file not available: $MISSION_OPT"
     exit 2
 fi
 
@@ -118,29 +108,15 @@ function recording_stop() {
 vehicle_reset
 
 
-## REFERENCE STANDARD RUNS ##
+## STANDARD RUNS ##
 for index in ${!WATER_SPEED[*]}
 do
-	# run config
+	# reference run config
 	WS="${WATER_SPEED[$index]}"
 	TAG="reference"
 
-	# reset configuration
-	rosparam set /pilot/fault_control false
-	rosparam set /pilot/optimal_allocation false
-
     # adjust water current (fixed)
     rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.0, 0.0]"
-
-    # adjust water current (slow varying)
-    #rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.025, 0.001]"
-
-    # adjust water current (high varying)
-	#rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.05, 0.01]"
-
-    # reset failure and fault mitigation
-	# rosrun vehicle_core fault_clear.sh
-	# rosservice call /pilot/fault_control "request: false"
 
     # enable recording
     recording_start $TAG $WS
@@ -155,38 +131,23 @@ do
 
     # reset the vehicle state
     vehicle_reset
-done
 
+    ### DISABLE PATH MONITOR UPDATES ###
+    rosservice call /saetta/map/switch "request: false"
+    rosservice call /saetta/map/dump "$OUTPUT/map_${TAG}_${WS}.json"
 
-## OPTIMAL STANDARD RUNS ##
-for index in ${!WATER_SPEED[*]}
-do
-	# run config
+    # optimal run config
 	WS="${WATER_SPEED[$index]}"
 	TAG="optimal"
 
-	# reset configuration
-	rosparam set /pilot/fault_control false
-	rosparam set /pilot/optimal_allocation false
-
     # adjust water current (fixed)
     rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.0, 0.0]"
-
-    # adjust water current (slow varying)
-    #rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.025, 0.001]"
-
-    # adjust water current (high varying)
-	#rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.05, 0.01]"
-
-    # reset failure and fault mitigation
-	# rosrun vehicle_core fault_clear.sh
-	# rosservice call /pilot/fault_control "request: false"
 
     # enable recording
     recording_start $TAG $WS
 
     echo "starting ${TAG}_${index} navigation experiment"
-    rosrun saetta_energy node_executor.py --output="$OUTPUT" --label="${TAG}_${WS}" $MISSION_OPT
+    rosrun saetta_energy node_executor.py --output="$OUTPUT" --label="${TAG}_${WS}" $MISSION
     echo "${TAG} run[$index]: exit code $?"
 
     # disable recording

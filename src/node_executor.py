@@ -67,8 +67,8 @@ class MissionExecutor(object):
 
         # estimation config
         self.n_bins = int(rospy.get_param('saetta/path/n_bins', 8))                 # number of direction bins
-        self.e_perf = float(rospy.get_param('saetta/path/initial_ejm', 70.0))       # navigation cost (J/m)
-        self.map_ejm = self.e_perf * np.ones(self.n_bins)                           # map of navigation costs
+        self.initial_ejm = float(rospy.get_param('saetta/path/initial_ejm', 70.0))  # navigation cost (J/m)
+        self.map_ejm = self.initial_ejm * np.ones(self.n_bins)                      # map of navigation costs
         self.route_optimization = False
 
         # update bins and add some slack
@@ -177,13 +177,14 @@ class MissionExecutor(object):
 
     def handle_map_ejm(self, data):
         # support change in the map (assuming linear spacing from -pi to pi)
-        self.n_bins = len(data.values)
         self.map_ejm = np.array(data.values)
 
-        # update bins and add some slack
-        self.phi_edges = np.linspace(-np.pi, np.pi, self.n_bins + 1)
-        self.phi_edges[0] -= 0.001
-        self.phi_edges[-1] += 0.001
+        if len(data.values) != self.n_bins:
+            # update bins and add some slack
+            self.n_bins = len(data.values)
+            self.phi_edges = np.linspace(-np.pi, np.pi, self.n_bins + 1)
+            self.phi_edges[0] -= 0.001
+            self.phi_edges[-1] += 0.001
 
 
     def state_idle(self):
@@ -409,7 +410,7 @@ class MissionExecutor(object):
             cost = self.map_ejm[yaw_idx] * dist
         else:
             rospy.logwarn('%s: binning failed, using default cost (yaw_los: %.2f, yaw_idx: %d, n_bins: %d)', self.name, yaw_los, yaw_idx, self.n_bins)
-            cost = self.e_perf * dist
+            cost = self.initial_ejm * dist
 
         return cost
 
@@ -608,6 +609,16 @@ def main():
 
     # init the executor
     me = MissionExecutor(**ex_config)
+
+    # add initial wait for maps
+    try:
+        rospy.wait_for_message(TOPIC_MAP_EJM, FloatArrayStamped, timeout=5)
+    except rospy.ROSException:
+        rospy.logwarn('%s: no map received proceeding with internal estimation ...', rospy.get_name())
+    else:
+        rospy.loginfo('%s: received initial estimation:\n%s', rospy.get_name(), me.map_ejm)
+
+    # setup the mission
     me.execute_mission(config)
 
     # start the mission
