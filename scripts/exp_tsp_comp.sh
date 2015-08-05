@@ -69,8 +69,6 @@ function vehicle_reset() {
 	rosservice call /pilot/switch "request: false"
 	rosservice call /pilot/fault_control "request: false"
 	rosservice call /nav/reset
-
-	rosservice call /saetta/map/reset
 }
 
 function recording_start() {
@@ -111,6 +109,8 @@ vehicle_reset
 ## STANDARD RUNS ##
 for index in ${!WATER_SPEED[*]}
 do
+    rosservice call /saetta/map/reset
+
 	# reference run config
 	WS="${WATER_SPEED[$index]}"
 	TAG="reference"
