@@ -110,6 +110,7 @@ vehicle_reset
 for index in ${!WATER_SPEED[*]}
 do
     rosservice call /saetta/map/reset
+    rosservice call /saetta/map/switch "request: true"
 
 	# reference run config
 	WS="${WATER_SPEED[$index]}"

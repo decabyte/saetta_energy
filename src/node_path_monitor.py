@@ -177,6 +177,7 @@ class PathMonitor(object):
         # disable and clean maps
         self.state = S_IDLE
         self._init_map()
+        self.switch = True
 
         rospy.logwarn('%s: resetting estimations and maps ...', self.name)
         return []
