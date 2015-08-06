@@ -50,8 +50,8 @@ class PathActionServer(actions.ActionServer):
         self.pos = np.zeros(6, dtype=np.float64)
 
         # ros interface
-        self.sub_nav = rospy.Subscriber(TOPIC_NAV, NavSts, self._handle_nav, queue_size=1)
-        self.pub_path = rospy.Publisher(TOPIC_PATH_REQ, PathRequest, queue_size=1)
+        self.sub_nav = rospy.Subscriber(TOPIC_NAV, NavSts, self._handle_nav, queue_size=10)
+        self.pub_path = rospy.Publisher(TOPIC_PATH_REQ, PathRequest, queue_size=10)
         self.sub_path = rospy.Subscriber(TOPIC_PATH_STS, PathStatus, self._handle_path_status, queue_size=10)
         self.srv_path = rospy.ServiceProxy(TOPIC_PATH_SRV, PathService)
 

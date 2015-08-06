@@ -110,18 +110,20 @@ class EnergyMonitor(object):
         self.status['energy_full'] = np.sum([ sub['energy_full'] for sub in self.status['subsystems'] ])
         self.status['energy_left'] = np.sum([ sub['energy_left'] for sub in self.status['subsystems'] ])
 
-        # ros interface
-        self.timer_update = rospy.Timer(rospy.Duration(self.ts_update, 0), self.update_status)
-        self.timer_publish = rospy.Timer(rospy.Duration(self.ts_publish, 0), self.publish_status)
-        self.pub_report = rospy.Publisher(TOPIC_GLOBAL, EnergyReport, queue_size=3, latch=True)
-
         # thruster subsystem
         self.thrs_window = AVG_TIME / THR_RATE
         self.thrs_current = np.zeros((6, self.thrs_window))
         self.thrs_energy = np.zeros(6)
-        self.sub_thrs = rospy.Subscriber(TOPIC_THRUSTERS, ThrusterFeedback, self.handle_thrusters, queue_size=3)
 
-    def publish_status(self, event):
+        # ros interface
+        self.sub_thrs = rospy.Subscriber(TOPIC_THRUSTERS, ThrusterFeedback, self.handle_thrusters, queue_size=10)
+        self.pub_report = rospy.Publisher(TOPIC_GLOBAL, EnergyReport, queue_size=10, latch=True)
+
+        self.timer_update = rospy.Timer(rospy.Duration(self.ts_update, 0), self.update_status)
+        self.timer_publish = rospy.Timer(rospy.Duration(self.ts_publish, 0), self.publish_status)
+
+
+    def publish_status(self, event=None):
         report = EnergyReport()
         report.header.stamp = rospy.Time.now()
 
@@ -136,7 +138,7 @@ class EnergyMonitor(object):
 
         self.pub_report.publish(report)
 
-    def update_status(self, event):
+    def update_status(self, event=None):
         prev_used = self.status['energy_used']
 
         # reset counters
