@@ -4,8 +4,8 @@
     <arg name="mdir" default="$(find saetta_energy)/data"/>
 
     <!-- support nodes -->
-    <include file="$(find saetta_energy)/launch/energy_monitor.launch"/>
-    <node name="path_monitor" pkg="saetta_energy" type="node_path_monitor.py" args="" output="screen"/>
+    <include file="$(find saetta_energy)/launch/action_path.launch"/>
+    <include file="$(find saetta_energy)/launch/path_monitor.launch"/>
 
     <!-- mission executor -->
     <node name="mission_executor" pkg="saetta_energy" type="node_executor.py" args="--output=$(arg mdir) $(arg mfile)" output="screen">

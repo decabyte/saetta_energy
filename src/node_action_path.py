@@ -1,9 +1,11 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+"""
+Reference: http://stackoverflow.com/questions/1894269/convert-string-representation-of-list-to-list-in-python
+"""
 from __future__ import division
 
 import ast
-
 import numpy as np
 np.set_printoptions(precision=3, suppress=True)
 
@@ -14,12 +16,12 @@ roslib.load_manifest('saetta_energy')
 import actionbus.actions as actions
 from vehicle_core.path import trajectory_tools as tt
 
-from auv_msgs.msg import NavSts
+from diagnostic_msgs.msg import KeyValue
 from actionbus.msg import ActionFeedback
+
+from auv_msgs.msg import NavSts
 from vehicle_interface.msg import PathRequest, PathStatus, Vector6
 from vehicle_interface.srv import PathService, PathServiceRequest
-from diagnostic_msgs.msg import KeyValue
-
 
 TOPIC_NAV = 'nav/sts'
 TOPIC_PATH_REQ = 'path/request'
@@ -73,6 +75,9 @@ class PathActionServer(actions.ActionServer):
         if self.state != actions.STATE_RUNNING:
             return
 
+        # update action duration
+        self.duration = data.time_elapsed
+
         if data.path_status == PathStatus.PATH_ABORT:
             self.path_enabled = False
             self.feedback = ActionFeedback.ACTION_FAILED
@@ -122,14 +127,12 @@ class PathActionServer(actions.ActionServer):
 
 
 class GotoPathServer(PathActionServer):
-    """Reference: http://stackoverflow.com/questions/1894269/convert-string-representation-of-list-to-list-in-python"""
-
     def __init__(self, **kwargs):
         super(GotoPathServer, self).__init__(ACTION_GOTO, **kwargs)
 
     def handle_dispatch(self, timeout, params):
         try:
-            goal = ast.literal_eval(params['pose'])
+            pose = ast.literal_eval(params['pose'])
         except (KeyError, SyntaxError):
             rospy.logerr('%s: received path action without pose param', self.__class__.__name__)
 
@@ -138,17 +141,15 @@ class GotoPathServer(PathActionServer):
             return
 
         mode = params.get('mode', 'fast')
-        target_speed = params.get('target_speed', 1.0)
+        target_speed = float(params.get('target_speed', 1.0))
 
-        est_dist = tt.distance_between(self.pos, goal, spacing_dim=3)
-        est_time = est_dist / (0.60 * target_speed)
-        path_timeout = max(timeout, est_time)
+        # if timeout <= 0.0:
+        #     est_dist = tt.distance_between(self.pos, pose[-1], spacing_dim=3)
+        #     est_time = est_dist / (0.5 * target_speed)
+        #     path_timeout = max(timeout, est_time)
 
-        poses = []
-        poses.append(goal)
-
-        rospy.loginfo('%s: requesting goto path with pose: %s', self.__class__.__name__, goal)
-        self._send_path_request(poses, mode=mode, timeout=path_timeout, target_speed=target_speed)
+        rospy.loginfo('%s: requesting goto path with final pose:\n%s', self.__class__.__name__, np.array(pose[-1]))
+        self._send_path_request(pose, mode=mode, timeout=timeout, target_speed=target_speed)
 
         self.feedback = ActionFeedback.ACTION_RUNNING
         self.state = actions.STATE_RUNNING
@@ -163,7 +164,7 @@ class HoverPathServer(PathActionServer):
 
     def handle_dispatch(self, timeout, params):
         try:
-            goal = ast.literal_eval(params['pose'])
+            pose = ast.literal_eval(params['pose'])
         except (KeyError, SyntaxError):
             rospy.logerr('%s: received path action without pose param', self.__class__.__name__)
 
@@ -171,11 +172,8 @@ class HoverPathServer(PathActionServer):
             self.state = actions.STATE_DONE
             return
 
-        poses = []
-        poses.append(goal)
-
-        rospy.loginfo('%s: requesting hover path with pose: %s', self.__class__.__name__, goal)
-        self._send_path_request(poses, mode='simple', timeout=timeout)
+        rospy.loginfo('%s: requesting hover path with final pose:\n%s', self.__class__.__name__, np.array(pose[-1]))
+        self._send_path_request(pose, mode='simple', timeout=timeout)
 
         self.feedback = ActionFeedback.ACTION_RUNNING
         self.state = actions.STATE_RUNNING
@@ -186,7 +184,7 @@ class HoverPathServer(PathActionServer):
 
 def main():
     # start ros node
-    rospy.init_node('node_interface')
+    rospy.init_node('node_action_path')
     name = rospy.get_name()
     rospy.loginfo('%s: init', name)
 
@@ -203,7 +201,6 @@ def main():
         sg.loop()
 
         rospy.sleep(DEFAULT_SLEEP)
-
 
 if __name__ == '__main__':
     main()

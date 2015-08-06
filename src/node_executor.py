@@ -21,30 +21,30 @@ from saetta_energy import tsp
 from saetta_energy.utils import id_generator, urlify
 from vehicle_core.path import trajectory_tools as tt
 
+from diagnostic_msgs.msg import KeyValue
+from actionbus.msg import ActionDispatch, ActionFeedback
+from saetta_energy.msg import EnergyReport, EnergyStatus
+
 from auv_msgs.msg import NavSts
 from vehicle_interface.msg import PathRequest, PathStatus, PilotStatus, Vector6, FloatArrayStamped
 from vehicle_interface.srv import BooleanService, PathService, PathServiceRequest, PathServiceResponse
-from saetta_energy.msg import EnergyReport, EnergyStatus
-from diagnostic_msgs.msg import KeyValue
-
 
 TOPIC_NAV = 'nav/nav_sts'
-TOPIC_PATH_REQ = 'path/request'
-TOPIC_PATH_STS = 'path/status'
-TOPIC_PATH_SRV = 'path/control'
 TOPIC_PILOT_STS = 'pilot/status'
 TOPIC_ENERGY = 'saetta/report'
 TOPIC_MAP_EJM = 'saetta/map/energy'
+
+TOPIC_PATH_REQ = 'path/request'
+TOPIC_PATH_STS = 'path/status'
+TOPIC_PATH_SRV = 'path/control'
+
+TOPIC_DISPATCH = 'action/dispatch'
+TOPIC_FEEDBACK = 'action/feedback'
 
 MISSION_IDLE = 'idle'
 MISSION_RUN = 'run'
 MISSION_COMPLETED = 'completed'
 MISSION_ABORT = 'abort'
-
-ACTION_IDLE = 'idle'
-ACTION_RUNNING = 'running'
-ACTION_ACHIEVED = 'achieved'
-ACTION_FAILED = 'failed'
 
 DEFAULT_RATE = 1.0      # Hz
 
@@ -77,7 +77,7 @@ class MissionExecutor(object):
         self.phi_edges[-1] += 0.001
 
         # mission state machine
-        self.state_mission = MISSION_IDLE
+        self.mission_state = MISSION_IDLE
         self.map_state_mission = {
             MISSION_IDLE: self.state_idle,
             MISSION_RUN: self.state_run,
@@ -85,27 +85,23 @@ class MissionExecutor(object):
             MISSION_ABORT: self.state_abort
         }
 
+        # actions states to mission states
+        self.map_action_mission = {
+            ActionFeedback.ACTION_FAILED: MISSION_ABORT,
+            ActionFeedback.ACTION_SUCCESS: MISSION_RUN,
+            ActionFeedback.ACTION_RUNNING: MISSION_RUN,
+            ActionFeedback.ACTION_IDLE: MISSION_RUN
+        }
+
         # action state machine
+        self.action_cnt = 0
         self.action_id = 0
-        self.state_action = ACTION_IDLE
-        self.last_action = None
-        self.current_action = {}
+        self.action_last = None
+        self.action_state = ActionFeedback.ACTION_IDLE
+        self.action_current = {}
 
         # vehicle state
         self.pos = np.zeros(6, dtype=np.float64)
-
-        # path monitoring
-        self.current_path_id = -1
-        self.last_path_id = 0
-        self.path_enabled = False
-
-        # actions states to mission states
-        self.map_action_mission = {
-            ACTION_FAILED: MISSION_ABORT,
-            ACTION_ACHIEVED: MISSION_RUN,
-            ACTION_RUNNING: MISSION_RUN,
-            ACTION_IDLE: MISSION_RUN
-        }
 
         # output
         self.output_dir = kwargs.get('output_dir', os.path.expanduser('~'))
@@ -123,14 +119,183 @@ class MissionExecutor(object):
 
         # ros interface
         self.sub_nav = rospy.Subscriber(TOPIC_NAV, NavSts, self.handle_nav, queue_size=10)
-        self.pub_path = rospy.Publisher(TOPIC_PATH_REQ, PathRequest, queue_size=10)
-        self.sub_path = rospy.Subscriber(TOPIC_PATH_STS, PathStatus, self.handle_path_status, queue_size=10)
-        self.srv_path = rospy.ServiceProxy(TOPIC_PATH_SRV, PathService)
         self.sub_energy = rospy.Subscriber(TOPIC_ENERGY, EnergyReport, self.handle_energy, queue_size=10)
         self.sub_map_ejm = rospy.Subscriber(TOPIC_MAP_EJM, FloatArrayStamped, self.handle_map_ejm, queue_size=10)
 
+        # action interface
+        self.pub_disp = rospy.Publisher(TOPIC_DISPATCH, ActionDispatch, queue_size=10)
+        self.sub_feed = rospy.Subscriber(TOPIC_FEEDBACK, ActionFeedback, self.handle_feedback, queue_size=10)
+
         # rate
         self.r_main = rospy.Rate(DEFAULT_RATE)
+
+
+    def handle_nav(self, data):
+        # parse navigation data
+        self.pos = np.array([
+            data.position.north,
+            data.position.east,
+            data.position.depth,
+            data.orientation.roll,
+            data.orientation.pitch,
+            data.orientation.yaw
+        ])
+
+    def handle_energy(self, data):
+        self.energy_last = data.energy_used
+
+    def handle_map_ejm(self, data):
+        # support change in the map (assuming linear spacing from -pi to pi)
+        self.map_ejm = np.array(data.values)
+
+        if len(data.values) != self.n_bins:
+            # update bins and add some slack
+            self.n_bins = len(data.values)
+            self.phi_edges = np.linspace(-np.pi, np.pi, self.n_bins + 1)
+            self.phi_edges[0] -= 0.001
+            self.phi_edges[-1] += 0.001
+
+
+    def run(self):
+        # mission init
+        #rospy.sleep(3.0)
+
+        while not rospy.is_shutdown():
+            # execute current state
+            self.map_state_mission[self.mission_state]()
+            self.r_main.sleep()
+
+    def state_idle(self):
+        if len(self.actions) < 1:
+            return
+
+        if self.action_id >= len(self.actions):
+            rospy.loginfo('%s: no more action to execute ...', self.name)
+            self.mission_state = MISSION_COMPLETED
+            return
+
+        # select action
+        self.action_current = self.actions[self.action_id]
+        self.action_state = ActionFeedback.ACTION_IDLE
+
+        # start action and resume mission
+        self.dispatch_action(self.action_current)
+        self.mission_state = MISSION_RUN
+
+    def state_run(self):
+        if self.action_state in (ActionFeedback.ACTION_FAILED, ActionFeedback.ACTION_REJECT, ActionFeedback.ACTION_TIMEOUT):
+            rospy.loginfo('%s: action %d failed, aborting mission ...', self.name, self.action_id)
+            self.mission_state = MISSION_ABORT
+
+        elif self.action_state == ActionFeedback.ACTION_SUCCESS:
+            rospy.loginfo('%s: action %d completed, continuing mission ...', self.name, self.action_id)
+
+            self.evaluate_action_result()
+            self.mission_state = MISSION_IDLE
+        else:
+            pass
+
+    def state_abort(self):
+        rospy.logwarn('%s: mission aborted', self.name)
+        rospy.signal_shutdown('mission aborted')
+
+    def state_completed(self):
+        rospy.loginfo('%s: mission completed with success', self.name)
+        rospy.signal_shutdown('mission completed')
+
+
+    def evaluate_action_result(self):
+        if self.action_current['name'] != 'hover':
+            self.action_id += 1
+            return
+
+        # increment action counter
+        self.action_id += 1
+
+        # mark inspection point as visited
+        try:
+            self.ips_state[self.action_current['ips']] = 1
+            self.hop_counter += 1
+        except KeyError:
+            return
+
+        # evaluate residuals
+        hops_costs, _ = self._calculate_cost_route(self.route[self.hop_counter:])
+        prev_cost = self.route_cost_hops[self.hop_counter:]
+
+        rospy.loginfo('%s: residual updates:\n  prev: %s\n  new: %s', self.name, sum(prev_cost), sum(hops_costs))
+
+        # # (ip achieved) calculate remaining inspection points
+        # ips_togo = [ip for ip, s in self.ips_state.iteritems() if s == 0]
+        # ips_togo = sorted(ips_togo, key=lambda x: int(x.split('IP_')[1]))
+        #
+        # # (optimize if there are at least two ips)
+        # if self.route_optimization and len(ips_togo) > 1:
+        #     rospy.loginfo('%s: route optimization, remaining inspection points %d', self.name, len(ips_togo))
+        #
+        #     self._plan(ips_togo)
+        #     self.action_id = 0
+
+
+    def dispatch_action(self, action):
+        # action stats
+        self.time_start = time.time()
+        self.energy_start = self.energy_last
+
+        params = dict(**action['params'])
+        mode = params.pop('mode', 'fast')
+        pose = [ params.pop('pose') ]
+
+        if action['name'] == ACT_GOTO:
+            # reporting
+            self.last_los_orient = tt.calculate_orientation(self.pos, pose[0])
+            self.last_los_dist = tt.distance_between(self.pos, pose[0], spacing_dim=3)
+        elif action['name'] == ACT_HOVER:
+            mode = 'simple'
+        else:
+            rospy.logerr('%s: unknown action: %s', self.name, action)
+            return
+
+        # increment action counter
+        self.action_cnt += 1
+        self.action_last = action
+
+        # send action dispatch
+        ad = ActionDispatch()
+        ad.header.stamp = rospy.Time.now()
+        ad.id = self.action_cnt
+        ad.name = action['name']
+        ad.command = ActionDispatch.ACTION_START
+        ad.feedback = ActionDispatch.FEED_STREAM
+        ad.timeout = 0
+        ad.params.append(KeyValue('pose', str(pose)))
+        ad.params.append(KeyValue('mode', str(mode)))
+        ad.params.extend([KeyValue(k, str(v)) for k, v in params])
+
+        rospy.loginfo('%s: dispatching action[%d]: %s', self.name, self.action_id, action['name'])
+        self.pub_disp.publish(ad)
+
+    def handle_feedback(self, data):
+        if data.name != self.action_last['name']:
+            return
+
+        if data.id != self.action_cnt:
+            return
+
+        if data.status in (ActionFeedback.ACTION_RUNNING, ActionFeedback.ACTION_IDLE):
+            return
+
+        if data.status == ActionFeedback.ACTION_SUCCESS and self.action_state != ActionFeedback.ACTION_SUCCESS:
+            # update action stats
+            self.time_end = time.time()
+            self.time_elapsed = self.time_end - self.time_start
+            self.energy_used = self.energy_last - self.energy_start
+
+            # record action stats
+            self._write_log(self.output_label, self.action_last)
+
+        # update action status
+        self.action_state = data.status
 
 
     def _init_log(self, label):
@@ -161,195 +326,6 @@ class MissionExecutor(object):
             mlog.write(out)
             mlog.flush()
 
-    def handle_nav(self, data):
-        # parse navigation data
-        self.pos = np.array([
-            data.position.north,
-            data.position.east,
-            data.position.depth,
-            data.orientation.roll,
-            data.orientation.pitch,
-            data.orientation.yaw
-        ])
-
-    def handle_energy(self, data):
-        self.energy_last = data.energy_used
-
-    def handle_map_ejm(self, data):
-        # support change in the map (assuming linear spacing from -pi to pi)
-        self.map_ejm = np.array(data.values)
-
-        if len(data.values) != self.n_bins:
-            # update bins and add some slack
-            self.n_bins = len(data.values)
-            self.phi_edges = np.linspace(-np.pi, np.pi, self.n_bins + 1)
-            self.phi_edges[0] -= 0.001
-            self.phi_edges[-1] += 0.001
-
-
-    def state_idle(self):
-        pass
-
-    def state_run(self):
-        if self.state_action == ACTION_IDLE:
-            try:
-                # select action
-                self.current_action = self.actions[self.action_id]
-
-                # start action
-                self.dispatch_action(self.current_action)
-                self.state_action = ACTION_RUNNING
-            except IndexError:
-                rospy.loginfo('%s: no more action to execute ...', self.name)
-                self.state_mission = MISSION_COMPLETED
-
-        elif self.state_action == ACTION_FAILED:
-            rospy.loginfo('%s: action %d failed, aborting mission ...', self.name, self.action_id)
-            self.state_mission = MISSION_ABORT
-
-        elif self.state_action == ACTION_ACHIEVED:
-            rospy.loginfo('%s: action %d completed, continuing mission ...', self.name, self.action_id)
-
-            self.evaluate_action_result()
-            self.state_action = ACTION_IDLE
-        else:
-            pass
-
-    def state_abort(self):
-        pass
-
-    def state_completed(self):
-        rospy.signal_shutdown('mission completed')
-
-
-    def evaluate_action_result(self):
-        if self.current_action['name'] != 'hover':
-            self.action_id += 1
-            return
-
-        # increment action counter
-        self.action_id += 1
-
-        # mark inspection point as visited
-        try:
-            self.ips_state[self.current_action['ips']] = 1
-            self.hop_counter += 1
-        except KeyError:
-            return
-
-        # evaluate residuals
-        hops_costs, _ = self._calculate_cost_route(self.route[self.hop_counter:])
-        prev_cost = self.route_cost_hops[self.hop_counter:]
-
-        rospy.loginfo('%s: residual updates:\n  prev: %s\n  new: %s', self.name, sum(prev_cost), sum(hops_costs))
-
-        # (ip achieved) calculate remaining inspection points
-        ips_togo = [ip for ip, s in self.ips_state.iteritems() if s == 0]
-        ips_togo = sorted(ips_togo, key=lambda x: int(x.split('IP_')[1]))
-
-        # (optimize if there are at least two ips)
-        if self.route_optimization and len(ips_togo) > 1:
-            rospy.loginfo('%s: route optimization, remaining inspection points %d', self.name, len(ips_togo))
-
-            self._plan(ips_togo)
-            self.action_id = 0
-
-
-    def dispatch_action(self, action):
-        rospy.loginfo('%s: dispatching action[%d]: %s', self.name, self.action_id, action['name'])
-
-        # action stats
-        self.last_action = action
-        self.time_start = time.time()
-        self.energy_start = self.energy_last
-
-        if action['name'] == ACT_GOTO:
-            params = action['params']
-            goal = params.pop('pose')
-            poses = [goal]
-
-            # reporting
-            self.last_los_orient = tt.calculate_orientation(self.pos, goal)
-            self.last_los_dist = tt.distance_between(self.pos, goal, spacing_dim=3)
-
-            self.send_path_request(poses, **params)
-        elif action['name'] == ACT_HOVER:
-            params = action['params']
-            goal = params.pop('pose')
-            mode = params.pop('mode', 'simple')
-            poses = [goal]
-
-            self.send_path_request(poses, mode=mode, **params)
-        else:
-            rospy.logerr('%s: unknown action: %s', self.name, action)
-
-    def handle_feedback(self, status):
-        # if self.state_action in (ACTION_RUNNING, ACTION_IDLE):
-        #     return
-
-        # update action stats
-        self.time_end = time.time()
-        self.time_elapsed = self.time_end - self.time_start
-        self.energy_used = self.energy_last - self.energy_start
-
-        # record action stats
-        self._write_log(self.output_label, self.last_action)
-
-        # update status
-        self.state_action = status
-
-
-    # TEMP: mock the action system with path requests
-    def handle_path_status(self, data):
-        self.last_path_id = data.path_id
-
-        if not self.path_enabled:
-            return
-
-        if self.state_action != ACTION_RUNNING:
-            return
-
-        if data.path_status in (PathStatus.PATH_ABORT, PathStatus.PATH_TIMEOUT):
-            self.path_enabled = False
-            self.handle_feedback(ACTION_FAILED)
-
-        if data.path_status == PathStatus.PATH_COMPLETED:
-            if data.navigation_status == PathStatus.NAV_HOVERING:
-                self.path_enabled = False
-                self.handle_feedback(ACTION_ACHIEVED)
-
-    # TEMP: mock the action system with path requests
-    def send_path_request(self, poses, **kwargs):
-        self.path_enabled = True
-
-        # params
-        mode = kwargs.get('mode', 'fast')
-        timeout = kwargs.get('timeout', 5 * 60)
-        target_speed = kwargs.get('target_speed', 1.0)
-        look_ahead = kwargs.get('look_ahead', 5.0)
-
-        points = [Vector6(x) for x in poses]
-
-        msg = PathRequest()
-        msg.header.stamp = rospy.Time.now()
-        msg.command = 'path'
-        msg.points = points
-        msg.options = [
-            KeyValue('mode', mode),
-            KeyValue('timeout', str(timeout)),
-            KeyValue('target_speed', str(target_speed)),
-            KeyValue('look_ahead', str(look_ahead)),
-        ]
-
-        self.pub_path.publish(msg)
-
-    def reset_path(self):
-        """This functions uses a service request to reset the state of the path controller"""
-        try:
-            self.srv_path.call(command=PathServiceRequest.CMD_RESET)
-        except Exception:
-            rospy.logerr('%s: unable to communicate with path service ...', self.name)
-
 
     def execute_mission(self, config, **kwargs):
         if self.config is not None:
@@ -378,7 +354,7 @@ class MissionExecutor(object):
             self.output_log = os.path.join(self.output_dir, '{}_{}.csv'.format(self.output_label, id_generator(6)))
 
         # init mission
-        self.state_mission = MISSION_IDLE
+        self.mission_state = MISSION_IDLE
         self._init_log(self.output_label)
 
         # insert inspection points
@@ -395,9 +371,6 @@ class MissionExecutor(object):
 
         # initial plan
         self._plan(ips_labels)
-
-        # change state
-        self.state_mission = MISSION_RUN
 
 
     def _calculate_cost_hop(self, wp_a, wp_b):
@@ -536,19 +509,6 @@ class MissionExecutor(object):
 
         # increase plan counter (to keep track of future replans)
         self.plan_id += 1
-
-
-    def run(self):
-        # mission init
-        self.reset_path()
-        rospy.sleep(3.0)
-
-        while not rospy.is_shutdown():
-            # execute current state
-            self.map_state_mission[self.state_mission]()
-
-            # wait a bit
-            self.r_main.sleep()
 
 
 def parse_arguments(args=None):

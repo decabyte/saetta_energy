@@ -1,0 +1,6 @@
+<launch>
+
+    <!-- start the actionbus server for controlling path actions -->
+    <node name="action_path" pkg="saetta_energy" type="node_action_path.py" output="screen" />
+
+</launch>
