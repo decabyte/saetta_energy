@@ -3,6 +3,7 @@
 from __future__ import division
 
 import ast
+
 import numpy as np
 np.set_printoptions(precision=3, suppress=True)
 
@@ -10,13 +11,13 @@ import rospy
 import roslib
 roslib.load_manifest('saetta_energy')
 
-import saetta_energy.actions as actions
+import actionbus.actions as actions
 from vehicle_core.path import trajectory_tools as tt
 
 from auv_msgs.msg import NavSts
-from saetta_energy.msg import ActionFeedback
-from vehicle_interface.msg import PathRequest, PathStatus, PilotStatus, Vector6
-from vehicle_interface.srv import BooleanService, PathService, PathServiceRequest, PathServiceResponse
+from actionbus.msg import ActionFeedback
+from vehicle_interface.msg import PathRequest, PathStatus, Vector6
+from vehicle_interface.srv import PathService, PathServiceRequest
 from diagnostic_msgs.msg import KeyValue
 
 

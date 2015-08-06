@@ -11,6 +11,8 @@
 
   <depend package="rospy"/>
   <depend package="diagnostic_msgs"/>
+  <depend package="actionbus"/>
+
   <depend package="vehicle_interface"/>
   <depend package="vehicle_core"/>
 
