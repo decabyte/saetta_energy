@@ -37,12 +37,13 @@ TOPIC_REQ = 'path/request'
 TOPIC_STS = 'path/status'
 TOPIC_PIL = 'pilot/status'
 TOPIC_ENE = 'saetta/report'
-SRV_RESET = 'saetta/map/reset'
-SRV_DUMP = 'saetta/map/dump'
-SRV_SWITCH = 'saetta/map/switch'
 
 TOPIC_MAP_EJM = 'saetta/map/energy'
 TOPIC_MAP_SPD = 'saetta/map/speed'
+
+SRV_RESET = 'saetta/map/reset'
+SRV_DUMP = 'saetta/map/dump'
+SRV_SWITCH = 'saetta/map/switch'
 
 # states
 S_IDLE = 0
@@ -68,31 +69,34 @@ class PathMonitor(object):
         self.state = S_IDLE
         self.switch = True
 
+        # vehicle
         self.pos = np.zeros(6)
         self.pos_prev = np.zeros(6)
         self.vel = np.zeros(6)
+
+        # monitors
         self.energy_last = 0.0
         self.energy_start = 0.0
         self.distance_travelled = 0.0
 
-        self.n_bins = int(kwargs.get('n_bins', 8))
-        self.n_samples = int(kwargs.get('n_samples', 10))
-        self.t_observe = float(kwargs.get('t_observe', 10.0))
-
-        self.sigma_thresh = float(kwargs.get('sigma_phi', np.deg2rad(10.0)))
-        self.speed_thresh = float(kwargs.get('speed_thresh', 0.3))
-
-        self.initial_ejm = float(kwargs.get('initial_ejm', 100.0))
-        self.initial_spd = float(kwargs.get('initial_spd', 0.5))
-
-        self.phi_edges = np.linspace(0, 2 * np.pi, self.n_bins + 1) - np.pi
-        self.phi_bins = self.phi_edges[:-1] + ((2 * np.pi / self.n_bins) / 2.0)
-
+        # chunking
         self.chunk_yaw = []
         self.chunk_energy = 0.0
         self.chunk_dist = 0.0
         self.chunk_ejm = 0.0
         self.chunk_start = 0.0
+
+        # params
+        self.n_bins = int(kwargs.get('n_bins', 8))
+        self.n_samples = int(kwargs.get('n_samples', 10))
+        self.t_observe = float(kwargs.get('t_observe', 10.0))
+        self.sigma_thresh = float(kwargs.get('sigma_phi', np.deg2rad(10.0)))
+        self.speed_thresh = float(kwargs.get('speed_thresh', 0.3))
+        self.initial_ejm = float(kwargs.get('initial_ejm', 100.0))
+        self.initial_spd = float(kwargs.get('initial_spd', 0.5))
+
+        self.phi_edges = np.linspace(0, 2 * np.pi, self.n_bins + 1) - np.pi
+        self.phi_bins = self.phi_edges[:-1] + ((2 * np.pi / self.n_bins) / 2.0)
 
         # init maps
         self._init_map()
@@ -230,20 +234,16 @@ class PathMonitor(object):
             self.state = S_RUNNING
 
     def handle_status(self, data):
-        if self.state == S_IDLE:
+        if self.state == S_IDLE or data.path_status == PathStatus.PATH_IDLE:
             return
 
-        if data.path_status in (PathStatus.PATH_IDLE, PathStatus.PATH_RUNNING):
+        if data.path_status == PathStatus.PATH_RUNNING:
             return
         elif data.path_status in (PathStatus.PATH_COMPLETED):
-            # reset state
             self.state = S_IDLE
         else:
-            # navigation failed
             rospy.logwarn('%s navigation aborted, skipping measurements ...', self.name)
-
-            # reset state
-            self.state = S_IDLE
+            self.state = S_IDLE # navigation failed
 
 
     def process_nav(self):
