@@ -8,9 +8,9 @@
     <include file="$(find saetta_energy)/launch/path_monitor.launch"/>
     <include file="$(find saetta_energy)/launch/action_path.launch"/>
 
-    <!-- mission executor -->
-    <node name="mission_executor" pkg="saetta_energy" type="node_executor.py" args="--output=$(arg mdir) $(arg mfile)" output="screen">
-        <param name="test" value=""/>
-    </node>
+    <!--&lt;!&ndash; mission executor &ndash;&gt;-->
+    <!--<node name="mission_executor" pkg="saetta_energy" type="node_executor.py" args="&#45;&#45;output=$(arg mdir) $(arg mfile)" output="screen">-->
+        <!--<param name="test" value=""/>-->
+    <!--</node>-->
 
 </launch>

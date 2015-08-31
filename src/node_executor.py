@@ -70,6 +70,7 @@ class MissionExecutor(object):
         self.initial_ejm = float(rospy.get_param('saetta/path/initial_ejm', 70.0))  # navigation cost (J/m)
         self.map_ejm = self.initial_ejm * np.ones(self.n_bins)                      # map of navigation costs
         self.route_optimization = False
+        self.energy_trans = 400.0                                                   # start & stop constant (empirically measured, Joules)
 
         # update bins and add some slack
         self.phi_edges = np.linspace(-np.pi, np.pi, self.n_bins + 1)                # direction bins (edges)
@@ -244,7 +245,7 @@ class MissionExecutor(object):
 
         params = dict(**action['params'])
         mode = params.pop('mode', 'fast')
-        pose = [ params.pop('pose') ]
+        pose = params.pop('pose')   # array N-by-6
 
         if action['name'] == ACT_GOTO:
             # reporting
@@ -276,6 +277,9 @@ class MissionExecutor(object):
         self.pub_disp.publish(ad)
 
     def handle_feedback(self, data):
+        if self.action_last is None:
+            return
+
         if data.name != self.action_last['name']:
             return
 
@@ -380,7 +384,7 @@ class MissionExecutor(object):
         yaw_idx = np.digitize([yaw_los], self.phi_edges)[0] - 1
 
         if yaw_idx >= 0 and yaw_idx < self.n_bins:
-            cost = self.map_ejm[yaw_idx] * dist
+            cost = self.map_ejm[yaw_idx] * dist + self.energy_trans
         else:
             rospy.logwarn('%s: binning failed, using default cost (yaw_los: %.2f, yaw_idx: %d, n_bins: %d)', self.name, yaw_los, yaw_idx, self.n_bins)
             cost = self.initial_ejm * dist
@@ -462,9 +466,27 @@ class MissionExecutor(object):
         self.actions.append({
             'name': 'hover',
             'params': {
-                'pose': next_pose.tolist()
+                'pose': [next_pose.tolist()]
             }
         })
+
+        # # generate long inspection task
+        # wps = [self.ips_dict[wp].tolist() for wp in self.route]
+        #
+        # self.actions.append({
+        #     'name': 'goto',
+        #     'params': {
+        #         'pose': wps
+        #     }
+        # })
+        #
+        # self.actions.append({
+        #     'name': 'hover',
+        #     'params': {
+        #         'pose': [wps[-1]]
+        #     },
+        #     'ips': self.route[-1]
+        # })
 
         # second execute the route (skips the initial piece (going to AUV position)
         for n in xrange(len(self.route)):
@@ -473,7 +495,7 @@ class MissionExecutor(object):
             self.actions.append({
                 'name': 'goto',
                 'params': {
-                    'pose': self.ips_dict[self.route[n]].tolist()
+                    'pose': [self.ips_dict[self.route[n]].tolist()]
                 },
                 'cost': self.route_cost_hops[n],
             })
@@ -484,7 +506,7 @@ class MissionExecutor(object):
             self.actions.append({
                 'name': 'hover',
                 'params': {
-                    'pose': next_pose.tolist()
+                    'pose': [next_pose.tolist()]
                 },
                 'ips': self.route[n]
             })
