@@ -70,7 +70,7 @@ class MissionExecutor(object):
         self.initial_ejm = float(rospy.get_param('saetta/path/initial_ejm', 70.0))  # navigation cost (J/m)
         self.map_ejm = self.initial_ejm * np.ones(self.n_bins)                      # map of navigation costs
         self.route_optimization = False
-        self.energy_trans = 400.0                                                   # start & stop constant (empirically measured, Joules)
+        self.energy_trans = float(rospy.get_param('saetta/path/energy_trans', 200.0))   # start & stop constant (empirically measured, Joules)
 
         # update bins and add some slack
         self.phi_edges = np.linspace(-np.pi, np.pi, self.n_bins + 1)                # direction bins (edges)
