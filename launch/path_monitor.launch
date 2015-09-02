@@ -1,14 +1,14 @@
 <launch>
 
     <!-- args -->
-    <arg name="save_maps" default="false"/>
+    <arg name="use_actions" default="false"/>
 
     <!-- load the config and start the monitor -->
     <rosparam command="delete" param="/saetta/path"/>
     <rosparam command="load" file="$(find saetta_energy)/conf/path_monitor.yaml"/>
 
-    <node name="path_monitor" pkg="saetta_energy" type="node_path_monitor.py" args="" output="screen">
-        <param name="save_maps" value="$(arg save_maps)"/>
-    </node>
+    <param name="/saetta/path/use_actions" value="$(arg use_actions)" />
+
+    <node name="path_monitor" pkg="saetta_energy" type="node_path_monitor.py" args="" output="screen" />
 
 </launch>

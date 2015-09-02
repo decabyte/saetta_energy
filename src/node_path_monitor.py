@@ -25,11 +25,14 @@ import rospy
 import roslib
 roslib.load_manifest('saetta_energy')
 
+from std_srvs.srv import Empty
+
 from auv_msgs.msg import NavSts
 from vehicle_interface.msg import PathRequest, PathStatus, FloatArrayStamped
 from vehicle_interface.srv import StringService, BooleanService, BooleanServiceResponse, StringServiceResponse
+
 from saetta_energy.msg import EnergyReport, EnergyStatus
-from std_srvs.srv import Empty
+from actionbus.msg import ActionFeedback, ActionDispatch
 
 # topics
 TOPIC_NAV = 'nav/nav_sts'
@@ -41,6 +44,9 @@ TOPIC_ENE = 'saetta/report'
 TOPIC_MAP_EJM = 'saetta/map/energy'
 TOPIC_MAP_SPD = 'saetta/map/speed'
 
+TOPIC_DISP = 'action/dispatch'
+TOPIC_FEED = 'action/feedback'
+
 SRV_RESET = 'saetta/map/reset'
 SRV_DUMP = 'saetta/map/dump'
 SRV_SWITCH = 'saetta/map/switch'
@@ -51,6 +57,7 @@ S_RUNNING = 1
 
 # defaults
 DEFAULT_UPDATE = 5          # secs
+ACTION_GOTO = 'goto'
 
 
 class CustomEncoder(json.JSONEncoder):
@@ -99,10 +106,18 @@ class PathMonitor(object):
         self._init_map()
 
         # ros interface
-        self.sub_req = rospy.Subscriber(TOPIC_REQ, PathRequest, self.handle_request, queue_size=10)
-        self.sub_sts = rospy.Subscriber(TOPIC_STS, PathStatus, self.handle_status, queue_size=10)
         self.sub_nav = rospy.Subscriber(TOPIC_NAV, NavSts, self.handle_nav, queue_size=10)
         self.sub_ene = rospy.Subscriber(TOPIC_ENE, EnergyReport, self.handle_energy, queue_size=10)
+
+        self.sub_sts = rospy.Subscriber(TOPIC_STS, PathStatus, self.handle_status, queue_size=10)
+
+        # listen to actions system
+        self.use_actions = bool(kwargs.get('use_action', True))
+
+        if self.use_actions:
+            self.sub_feed = rospy.Subscriber(TOPIC_FEED, ActionFeedback, self.handle_feedback, queue_size=10)
+        else:
+            self.sub_req = rospy.Subscriber(TOPIC_REQ, PathRequest, self.handle_request, queue_size=10)
 
         # maps interface
         self.pub_map_ejm = rospy.Publisher(TOPIC_MAP_EJM, FloatArrayStamped, queue_size=10, latch=True)
@@ -152,7 +167,6 @@ class PathMonitor(object):
         # discard last measurement if disabled
         if not self.switch:
             self.state = S_IDLE
-            #self._reset_chunk()
 
         rospy.logwarn('%s: resetting status: %s', self.name, self.switch)
         return BooleanServiceResponse(response=self.switch)
@@ -166,7 +180,6 @@ class PathMonitor(object):
 
         rospy.logwarn('%s: resetting estimations and maps ...', self.name)
         return []
-
 
     def handle_energy(self, data):
         """parse energy meter (Wh) and converts to Joules (J = Wh * 3600)"""
@@ -212,6 +225,15 @@ class PathMonitor(object):
             # navigation failed
             self.state = S_IDLE
             rospy.logwarn('%s navigation aborted, skipping measurements ...', self.name)
+
+    def handle_feedback(self, data):
+        if data.name != ACTION_GOTO:
+            return
+
+        if data.status == ActionFeedback.ACTION_RUNNING:
+            self.state = S_RUNNING
+        else:
+            self.state = S_IDLE
 
 
     def process_nav(self):

@@ -5,8 +5,11 @@
 
     <!-- support nodes -->
     <include file="$(find saetta_energy)/launch/energy_monitor.launch"/>
-    <include file="$(find saetta_energy)/launch/path_monitor.launch"/>
     <include file="$(find saetta_energy)/launch/action_path.launch"/>
+
+    <include file="$(find saetta_energy)/launch/path_monitor.launch">
+        <arg name="use_actions" value="true"/>
+    </include>
 
     <!--&lt;!&ndash; mission executor &ndash;&gt;-->
     <!--<node name="mission_executor" pkg="saetta_energy" type="node_executor.py" args="&#45;&#45;output=$(arg mdir) $(arg mfile)" output="screen">-->
