@@ -5,12 +5,13 @@
 saetta:
   path:
       n_bins: 8             # int (number of direction bins)
-      n_samples: 10.0       # int (number of frames to be averaged)
-      t_observe: 5.0        # sec (maximum length of observation chunk)
+      n_samples: 100.0      # int (number of frames to be averaged)
 
       sigma_phi: 6.0        # deg
       speed_thresh: 0.50    # m/s
 
       initial_ejm: 70.0     # J/m (initial energy performance)
       initial_spd: 0.75     # m/s (initial average speed)
+
       energy_trans: 200.0   # J (start and stop energy offset, empirically measured)
+      t_observe: 5.0        # sec (maximum length of observation chunk)

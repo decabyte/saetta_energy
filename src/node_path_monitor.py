@@ -71,32 +71,42 @@ class PathMonitor(object):
 
         # vehicle
         self.pos = np.zeros(6)
-        self.pos_prev = np.zeros(6)
         self.vel = np.zeros(6)
-
-        # monitors
         self.energy_last = 0.0
-        self.energy_start = 0.0
-        self.distance_travelled = 0.0
 
-        # chunking
-        self.chunk_yaw = []
-        self.chunk_energy = 0.0
-        self.chunk_dist = 0.0
-        self.chunk_ejm = 0.0
-        self.chunk_start = 0.0
+        # self.pos_prev = np.zeros(6)
+        # self.distance_travelled = 0.0
+        # self.energy_start = 0.0
+        #
+        # # chunking
+        # self.chunk_yaw = []
+        # self.chunk_energy = 0.0
+        # self.chunk_dist = 0.0
+        # self.chunk_ejm = 0.0
+        # self.chunk_start = 0.0
+        #
+        # self.t_observe = float(kwargs.get('t_observe', 10.0))
 
         # params
         self.n_bins = int(kwargs.get('n_bins', 8))
-        self.n_samples = int(kwargs.get('n_samples', 10))
-        self.t_observe = float(kwargs.get('t_observe', 10.0))
+        self.n_samples = int(kwargs.get('n_samples', 50))
+
         self.sigma_thresh = float(kwargs.get('sigma_phi', np.deg2rad(10.0)))
         self.speed_thresh = float(kwargs.get('speed_thresh', 0.3))
+        self.dist_thresh = float(kwargs.get('dist_thresh', 1.0))
+
         self.initial_ejm = float(kwargs.get('initial_ejm', 100.0))
         self.initial_spd = float(kwargs.get('initial_spd', 0.5))
 
         self.phi_edges = np.linspace(0, 2 * np.pi, self.n_bins + 1) - np.pi
         self.phi_bins = self.phi_edges[:-1] + ((2 * np.pi / self.n_bins) / 2.0)
+
+        # continuos chunking
+        self.samples_nav = np.zeros((self.n_samples, 6))
+        self.samples_energy = np.zeros(self.n_samples)
+        self.samples_cached = False
+        self.samples_cnt = 0
+        self.map_length = 10 * 60 * 10
 
         # init maps
         self._init_map()
@@ -121,31 +131,13 @@ class PathMonitor(object):
 
 
     def _init_map(self):
-        # initialize map
-        self.map_ejm = []
-        self.map_spd = []
+        self.map_ejm = np.zeros((self.n_bins, self.map_length), dtype=np.float32)
+        self.map_spd = np.zeros_like(self.map_ejm)
+        self.map_flags = np.zeros(self.n_bins, dtype=np.bool)
+        self.map_idx = np.zeros(self.n_bins, dtype=np.int)
 
-        for n in xrange(self.n_bins):
-            self.map_ejm.append(collections.deque([self.initial_ejm]))
-            self.map_spd.append(collections.deque([self.initial_spd]))
-
-        # initialize estimations
-        self.est_ejm = self.initial_ejm * np.ones(self.n_bins)
-        self.est_spd = self.initial_spd * np.ones(self.n_bins)
-
-        # clean last chunk
-        self._reset_chunk()
-
-        # reset label
-        self.date = datetime.datetime.now()
-        self.label = self.date.strftime('%Y%m%d_%H%M%S')
-
-    def _reset_chunk(self):
-        self.distance_travelled = 0.0
-        self.energy_start = np.copy(self.energy_last)
-        self.chunk_start = time.time()
-        self.chunk_yaw = []
-
+        self.map_ejm[:, 0] = self.initial_ejm
+        self.map_spd[:, 0] = self.initial_spd
 
     def handle_dump(self, data):
         user_path = data.request
@@ -156,9 +148,10 @@ class PathMonitor(object):
 
         out = {
             'n_bins': self.n_bins,
-            't_observe': self.t_observe,
-            'map_ejm': self.map_ejm,
-            'map_spd': self.map_spd,
+            'map_ejm': self.map_ejm.tolist(),
+            'map_spd': self.map_spd.tolist(),
+            'map_idx': self.map_idx.tolist(),
+            'map_flags': self.map_flags.tolist(),
         }
 
         with open(user_path, 'wt') as jf:
@@ -172,7 +165,7 @@ class PathMonitor(object):
         # discard last measurement if disabled
         if not self.switch:
             self.state = S_IDLE
-            self._reset_chunk()
+            #self._reset_chunk()
 
         rospy.logwarn('%s: resetting status: %s', self.name, self.switch)
         return BooleanServiceResponse(response=self.switch)
@@ -180,8 +173,9 @@ class PathMonitor(object):
     def handle_reset(self, data=None):
         # disable and clean maps
         self.state = S_IDLE
-        self._init_map()
         self.switch = True
+
+        self._init_map()
 
         rospy.logwarn('%s: resetting estimations and maps ...', self.name)
         return []
@@ -212,25 +206,11 @@ class PathMonitor(object):
         ])
 
         if self.state == S_RUNNING and self.switch:
-            # virtual odometer
-            self.distance_travelled += np.linalg.norm(self.pos[0:3] - self.pos_prev[0:3])
-
-            # analyse path
             self.process_nav()
-
-        # save previous nav state
-        self.pos_prev = self.pos
 
 
     def handle_request(self, data):
         if data.command == PathRequest.CMD_PATH:
-            # init chunk
-            self.chunk_yaw = []
-            self.distance_travelled = 0.0
-            self.energy_start = np.copy(self.energy_last)
-            self.chunk_start = time.time()
-
-            # update state
             self.state = S_RUNNING
 
     def handle_status(self, data):
@@ -242,82 +222,144 @@ class PathMonitor(object):
         elif data.path_status in (PathStatus.PATH_COMPLETED):
             self.state = S_IDLE
         else:
+            # navigation failed
+            self.state = S_IDLE
             rospy.logwarn('%s navigation aborted, skipping measurements ...', self.name)
-            self.state = S_IDLE # navigation failed
 
 
     def process_nav(self):
-        self.chunk_yaw.append(self.pos[5])
-        time_delta = time.time() - self.chunk_start
+        self.samples_nav = np.roll(self.samples_nav, -1, axis=0)
+        self.samples_energy = np.roll(self.samples_energy, -1)
 
-        if np.std(self.chunk_yaw) > self.sigma_thresh or time_delta > self.t_observe:
-            # statistical analysis
-            #   select the most frequent yaw value from modes (aka the mode)
-            mu = np.mean(self.chunk_yaw)
-            nu = np.median(self.chunk_yaw)
-            sigma = np.std(self.chunk_yaw)
+        self.samples_nav[-1, :] = np.copy(self.pos)
+        self.samples_energy[-1] = np.copy(self.energy_last)
 
-            # local binning and mode extraction
-            #   diff extracts the
-            hist, bin_edges = np.histogram(self.chunk_yaw, bins=10)
-            mode = bin_edges[np.argmax(hist)] + (bin_edges[1] - bin_edges[0]) / 2.0
+        if not self.samples_cached:
+            self.samples_cnt += 1
 
-            rospy.loginfo('%s: chunk: mean: %.3f, sigma: %.3f,  median: %.3f, mode: %.3f', self.name,
-                np.rad2deg(mu), np.rad2deg(sigma), np.rad2deg(nu), np.rad2deg(mode)
-            )
-
-            # chunk variance rejection
-            if sigma > self.sigma_thresh * 1.5:
-                self._reset_chunk()
-                rospy.loginfo('%s: chunk: discarded: sigma: %.3f', self.name, np.rad2deg(sigma))
+            if self.samples_cnt > self.n_samples:
+                self.samples_cached = True
+                rospy.loginfo('%s: initial samples cached, starting estimator ...', self.name)
+            else:
                 return
 
-            # update odometer and energy meter
-            self.chunk_dist = np.copy(self.distance_travelled)
-            self.chunk_energy = self.energy_last - self.energy_start
+        # check yaw conditions
+        sigma = np.std(self.samples_nav[:, 5])
 
-            # chunk metrics
-            self.chunk_duration = time.time() - self.chunk_start
-            self.chunk_ejm = self.chunk_energy / self.chunk_dist
-            self.chunk_spd = self.chunk_dist / self.chunk_duration
+        if sigma > self.sigma_thresh:
+            return
 
-            # chunk speed rejection
-            if self.chunk_spd < self.speed_thresh:
-                self._reset_chunk()
-                rospy.loginfo('%s: chuck: discarded: spd: %.3f', self.name, self.chunk_spd)
-                return
+        dist = np.sum(np.linalg.norm(np.diff(self.samples_nav[:, 0:3], axis=0), axis=1))
+        cost = self.samples_energy[-1] - self.samples_energy[0]
 
-            # direction binning (selecting the yaw sector)
-            #   bins[i-1] <= x < bins[i]
-            self.chunk_bin = np.digitize([mode], self.phi_edges)[0] - 1
+        if dist <= 0.0:
+            return
 
-            if self.chunk_bin < 0:
-                self._reset_chunk()
-                rospy.loginfo('%s: chuck: discarded: bin: %d', self.name, self.chunk_bin)
-                return
+        metric = cost / dist
 
-            # map update
-            self.map_ejm[self.chunk_bin].append(self.chunk_ejm)
-            self.map_spd[self.chunk_bin].append(self.chunk_spd)
+        if metric <= 0.0:
+            return
 
-            rospy.loginfo('%s: chunk: update bin: %d, ejm: %.3f, spd: %.3f', self.name, self.chunk_bin, self.chunk_ejm, self.chunk_spd)
-            self._reset_chunk()
+        # check spd conditions
+        avg_spd = dist / (self.n_samples / 10)
+
+        if avg_spd < self.speed_thresh or avg_spd > 2.0:
+            return
+
+        #rospy.loginfo('%s: metric: %.3f', self.name, metric)
+
+        # local binning and mode extraction
+        hist, bin_edges = np.histogram(self.samples_nav[:, 5], bins=10)
+        mode = bin_edges[np.argmax(hist)] + (bin_edges[1] - bin_edges[0]) / 2.0
+
+        # direction binning (selecting the yaw sector)
+        #   bins[i-1] <= x < bins[i]
+        curr_bin = np.digitize([mode], self.phi_edges)[0] - 1
+
+        # map update
+        curr_idx = self.map_idx[curr_bin]
+
+        self.map_ejm[curr_bin, curr_idx] = metric
+        self.map_spd[curr_bin, curr_idx] = avg_spd
+
+        # update index
+        next_idx = (self.map_idx[curr_bin] + 1) % self.map_length
+        self.map_idx[curr_bin] = next_idx
+
+        # sliding map
+        if not self.map_flags[curr_bin] and next_idx < curr_idx:
+            self.map_flags[curr_bin] = True
+
+
+    # def process_nav(self):
+    #     self.chunk_yaw.append(self.pos[5])
+    #     time_delta = time.time() - self.chunk_start
+    #
+    #     if np.std(self.chunk_yaw) > self.sigma_thresh or time_delta > self.t_observe:
+    #         # statistical analysis
+    #         #   select the most frequent yaw value from modes (aka the mode)
+    #         mu = np.mean(self.chunk_yaw)
+    #         nu = np.median(self.chunk_yaw)
+    #         sigma = np.std(self.chunk_yaw)
+    #
+    #         # local binning and mode extraction
+    #         #   diff extracts the
+    #         hist, bin_edges = np.histogram(self.chunk_yaw, bins=10)
+    #         mode = bin_edges[np.argmax(hist)] + (bin_edges[1] - bin_edges[0]) / 2.0
+    #
+    #         rospy.loginfo('%s: chunk: mean: %.3f, sigma: %.3f,  median: %.3f, mode: %.3f', self.name,
+    #             np.rad2deg(mu), np.rad2deg(sigma), np.rad2deg(nu), np.rad2deg(mode)
+    #         )
+    #
+    #         # chunk variance rejection
+    #         if sigma > self.sigma_thresh * 1.5:
+    #             self._reset_chunk()
+    #             rospy.loginfo('%s: chunk: discarded: sigma: %.3f', self.name, np.rad2deg(sigma))
+    #             return
+    #
+    #         # update odometer and energy meter
+    #         self.chunk_dist = np.copy(self.distance_travelled)
+    #         self.chunk_energy = self.energy_last - self.energy_start
+    #
+    #         # chunk metrics
+    #         self.chunk_duration = time.time() - self.chunk_start
+    #         self.chunk_ejm = self.chunk_energy / self.chunk_dist
+    #         self.chunk_spd = self.chunk_dist / self.chunk_duration
+    #
+    #         # chunk speed rejection
+    #         if self.chunk_spd < self.speed_thresh:
+    #             self._reset_chunk()
+    #             rospy.loginfo('%s: chuck: discarded: spd: %.3f', self.name, self.chunk_spd)
+    #             return
+    #
+    #         # direction binning (selecting the yaw sector)
+    #         #   bins[i-1] <= x < bins[i]
+    #         self.chunk_bin = np.digitize([mode], self.phi_edges)[0] - 1
+    #
+    #         if self.chunk_bin < 0:
+    #             self._reset_chunk()
+    #             rospy.loginfo('%s: chuck: discarded: bin: %d', self.name, self.chunk_bin)
+    #             return
+    #
+    #         # map update
+    #         self.map_ejm[self.chunk_bin].append(self.chunk_ejm)
+    #         self.map_spd[self.chunk_bin].append(self.chunk_spd)
+    #
+    #         rospy.loginfo('%s: chunk: update bin: %d, ejm: %.3f, spd: %.3f', self.name, self.chunk_bin, self.chunk_ejm, self.chunk_spd)
+    #         self._reset_chunk()
 
 
     def publish_estimations(self, event=None):
-        # # exponential weights
-        # weights = np.exp(np.linspace(0, 1, self.n_samples)) / np.exp(1)
-        #
-        # # weighted average
-        # self.est_ejm = np.average(self.map_ejm, weights=weights, axis=1).flatten()
-        # self.est_spd = np.average(self.map_spd, weights=weights, axis=1).flatten()
-
         self.est_ejm = []
         self.est_spd = []
 
         for n in xrange(self.n_bins):
-            self.est_ejm.append(np.median(self.map_ejm[n]).astype(float))
-            self.est_spd.append(np.median(self.map_spd[n]).astype(float))
+            b = self.map_length if self.map_flags[n] else self.map_idx[n] + 1
+            ejm = np.mean(self.map_ejm[n, 0:b]).astype(float)
+            spd = np.mean(self.map_spd[n, 0:b]).astype(float)
+
+            self.est_ejm.append(ejm)
+            self.est_spd.append(spd)
 
         # ros messages
         fa = FloatArrayStamped()
@@ -330,65 +372,14 @@ class PathMonitor(object):
         fa.values = self.est_spd
         self.pub_map_spd.publish(fa)
 
+        rospy.loginfo('%s: ejm: %s', self.name, self.est_ejm)
 
-def save_maps(pm, steps=20, **kwargs):
-    # http://stackoverflow.com/questions/9071084/polar-contour-plot-in-matplotlib-best-modern-way-to-do-it
-    # generate theta axis
-    th = np.linspace(pm.phi_edges[0], pm.phi_edges[-1], steps * pm.n_bins)
-    label = pm.label
-
-    # estimated ejm
-    m = np.copy(pm.est_ejm)
-    r = m.reshape((-1, 1)).repeat(steps, axis=1).flatten()
-
-    # ejm plot
-    fig, ax = plt.subplots(subplot_kw=dict(projection='polar'))
-    ax.set_theta_direction(-1)
-    ax.set_theta_zero_location('N')
-    ax.set_xlabel('Direction (deg)')
-    ax.set_title('Average Energy Usage (J/m) by Direction')
-
-    ax.plot(th, r, 'o')
-    ax.set_rmax(np.max(r) * 1.1)
-
-    # # estimated ejm interpolation
-    # tck = sci.interpolate.splrep(pm.phi_bins, m)
-    # rint = sci.interpolate.splev(th, tck)
-    # ax.plot(th, rint)
-
-    try:
-        fig.canvas.draw()
-        fig.savefig('/tmp/map_ejm_{}.png'.format(label), dpi=90)
-    except Exception as e:
-        rospy.logwarn('%s: cannot save map:\n%s', rospy.get_name(), e)
-
-    # estimated spd
-    m = np.copy(pm.est_spd)
-    r = m.reshape((-1, 1)).repeat(steps, axis=1).flatten()
-
-    # ejm plot
-    fig, ax = plt.subplots(subplot_kw=dict(projection='polar'))
-    ax.set_theta_direction(-1)
-    ax.set_theta_zero_location('N')
-    ax.set_xlabel('Direction (deg)')
-    ax.set_title('Average Cruise Speed (m/s) by Direction')
-
-    ax.plot(th, r, 'o')
-    ax.set_rmax(np.max(r) * 1.1)
-
-    # # estimated spd interpolation
-    # tck = sci.interpolate.splrep(pm.phi_bins, m)
-    # rint = sci.interpolate.splev(th, tck)
-    # ax.plot(th, rint)
-
-    try:
-        fig.canvas.draw()
-        fig.savefig('/tmp/map_spd_{}.png'.format(label), dpi=90)
-    except Exception as e:
-        rospy.logwarn('%s: cannot save map:\n%s', rospy.get_name(), e)
-
-    # clean plots
-    plt.close('all')
+        # # exponential weights
+        # weights = np.exp(np.linspace(0, 1, self.n_samples)) / np.exp(1)
+        #
+        # # weighted average
+        # self.est_ejm = np.average(self.map_ejm, weights=weights, axis=1).flatten()
+        # self.est_spd = np.average(self.map_spd, weights=weights, axis=1).flatten()
 
 def main():
     rospy.init_node('path_monitor')
@@ -396,16 +387,12 @@ def main():
 
     # config
     config = rospy.get_param('saetta/path', {})
-    enable_maps = bool(rospy.get_param('~save_maps', False))
 
-    # init
     pm = PathMonitor(**config)
+    rospy.spin()
 
-    while not rospy.is_shutdown():
-        if enable_maps:
-            save_maps(pm)
-
-        rospy.sleep(5.0)
+    # while not rospy.is_shutdown():
+    #     rospy.sleep(5.0)
 
 if __name__ == '__main__':
     main()
