@@ -74,19 +74,6 @@ class PathMonitor(object):
         self.vel = np.zeros(6)
         self.energy_last = 0.0
 
-        # self.pos_prev = np.zeros(6)
-        # self.distance_travelled = 0.0
-        # self.energy_start = 0.0
-        #
-        # # chunking
-        # self.chunk_yaw = []
-        # self.chunk_energy = 0.0
-        # self.chunk_dist = 0.0
-        # self.chunk_ejm = 0.0
-        # self.chunk_start = 0.0
-        #
-        # self.t_observe = float(kwargs.get('t_observe', 10.0))
-
         # params
         self.n_bins = int(kwargs.get('n_bins', 8))
         self.n_samples = int(kwargs.get('n_samples', 50))
@@ -101,12 +88,12 @@ class PathMonitor(object):
         self.phi_edges = np.linspace(0, 2 * np.pi, self.n_bins + 1) - np.pi
         self.phi_bins = self.phi_edges[:-1] + ((2 * np.pi / self.n_bins) / 2.0)
 
-        # continuos chunking
+        # continuous chunking
         self.samples_nav = np.zeros((self.n_samples, 6))
         self.samples_energy = np.zeros(self.n_samples)
         self.samples_cached = False
-        self.samples_cnt = 0
-        self.map_length = 10 * 60 * 10
+        self.samples_cnt = 0                # samples
+        self.map_length = 10 * 60 * 10      # samples
 
         # init maps
         self._init_map()
@@ -289,65 +276,6 @@ class PathMonitor(object):
         # sliding map
         if not self.map_flags[curr_bin] and next_idx < curr_idx:
             self.map_flags[curr_bin] = True
-
-
-    # def process_nav(self):
-    #     self.chunk_yaw.append(self.pos[5])
-    #     time_delta = time.time() - self.chunk_start
-    #
-    #     if np.std(self.chunk_yaw) > self.sigma_thresh or time_delta > self.t_observe:
-    #         # statistical analysis
-    #         #   select the most frequent yaw value from modes (aka the mode)
-    #         mu = np.mean(self.chunk_yaw)
-    #         nu = np.median(self.chunk_yaw)
-    #         sigma = np.std(self.chunk_yaw)
-    #
-    #         # local binning and mode extraction
-    #         #   diff extracts the
-    #         hist, bin_edges = np.histogram(self.chunk_yaw, bins=10)
-    #         mode = bin_edges[np.argmax(hist)] + (bin_edges[1] - bin_edges[0]) / 2.0
-    #
-    #         rospy.loginfo('%s: chunk: mean: %.3f, sigma: %.3f,  median: %.3f, mode: %.3f', self.name,
-    #             np.rad2deg(mu), np.rad2deg(sigma), np.rad2deg(nu), np.rad2deg(mode)
-    #         )
-    #
-    #         # chunk variance rejection
-    #         if sigma > self.sigma_thresh * 1.5:
-    #             self._reset_chunk()
-    #             rospy.loginfo('%s: chunk: discarded: sigma: %.3f', self.name, np.rad2deg(sigma))
-    #             return
-    #
-    #         # update odometer and energy meter
-    #         self.chunk_dist = np.copy(self.distance_travelled)
-    #         self.chunk_energy = self.energy_last - self.energy_start
-    #
-    #         # chunk metrics
-    #         self.chunk_duration = time.time() - self.chunk_start
-    #         self.chunk_ejm = self.chunk_energy / self.chunk_dist
-    #         self.chunk_spd = self.chunk_dist / self.chunk_duration
-    #
-    #         # chunk speed rejection
-    #         if self.chunk_spd < self.speed_thresh:
-    #             self._reset_chunk()
-    #             rospy.loginfo('%s: chuck: discarded: spd: %.3f', self.name, self.chunk_spd)
-    #             return
-    #
-    #         # direction binning (selecting the yaw sector)
-    #         #   bins[i-1] <= x < bins[i]
-    #         self.chunk_bin = np.digitize([mode], self.phi_edges)[0] - 1
-    #
-    #         if self.chunk_bin < 0:
-    #             self._reset_chunk()
-    #             rospy.loginfo('%s: chuck: discarded: bin: %d', self.name, self.chunk_bin)
-    #             return
-    #
-    #         # map update
-    #         self.map_ejm[self.chunk_bin].append(self.chunk_ejm)
-    #         self.map_spd[self.chunk_bin].append(self.chunk_spd)
-    #
-    #         rospy.loginfo('%s: chunk: update bin: %d, ejm: %.3f, spd: %.3f', self.name, self.chunk_bin, self.chunk_ejm, self.chunk_spd)
-    #         self._reset_chunk()
-
 
     def publish_estimations(self, event=None):
         self.est_ejm = []
