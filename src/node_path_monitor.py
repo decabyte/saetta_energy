@@ -83,7 +83,7 @@ class PathMonitor(object):
 
         # params
         self.n_bins = int(kwargs.get('n_bins', 8))
-        self.n_samples = int(kwargs.get('n_samples', 50))
+        self.n_win = int(kwargs.get('n_win', 50))
 
         self.sigma_thresh = float(kwargs.get('sigma_phi', np.deg2rad(10.0)))
         self.speed_thresh = float(kwargs.get('speed_thresh', 0.3))
@@ -92,23 +92,27 @@ class PathMonitor(object):
         self.initial_ejm = float(kwargs.get('initial_ejm', 100.0))
         self.initial_spd = float(kwargs.get('initial_spd', 0.5))
 
-        self.phi_edges = np.linspace(0, 2 * np.pi, self.n_bins + 1) - np.pi
-        self.phi_bins = self.phi_edges[:-1] + ((2 * np.pi / self.n_bins) / 2.0)
+        # sliding window
+        self.win_nav = np.zeros((self.n_win, 6))        # holds nav samples
+        self.win_vel = np.zeros((self.n_win, 6))        # holds vel samples
+        self.win_energy = np.zeros(self.n_win)          # holds energy readings
+        self.win_filled = False                         # check initial window filling
+        self.win_cnt = 0                                # counter (samples)
 
-        # continuous chunking
-        self.samples_nav = np.zeros((self.n_samples, 6))
-        self.samples_energy = np.zeros(self.n_samples)
-        self.samples_cached = False
-        self.samples_cnt = 0                # samples
-        self.map_length = 10 * 60 * 10      # samples
+        # features map
+        self.map_length = int(kwargs.get('n_length', 10 * 60 * 10))     # time duration of sampling window (samples)
+        self.map_features = 7                                           # number of features (time, energy, yaw, yaw_std, v, v_std, dist)
+        self.map_idx = 0                                                # counter (samples)
 
-        # init maps
         self._init_map()
+
+        # direction bins
+        self.phi_edges = np.linspace(0.0, 2 * np.pi, self.n_bins + 1) - np.pi
+        self.phi_bins = self.phi_edges[:-1] + ((2 * np.pi / self.n_bins) / 2.0)
 
         # ros interface
         self.sub_nav = rospy.Subscriber(TOPIC_NAV, NavSts, self.handle_nav, queue_size=10)
         self.sub_ene = rospy.Subscriber(TOPIC_ENE, EnergyReport, self.handle_energy, queue_size=10)
-
         self.sub_sts = rospy.Subscriber(TOPIC_STS, PathStatus, self.handle_status, queue_size=10)
 
         # listen to actions system
@@ -133,13 +137,8 @@ class PathMonitor(object):
 
 
     def _init_map(self):
-        self.map_ejm = np.zeros((self.n_bins, self.map_length), dtype=np.float32)
-        self.map_spd = np.zeros_like(self.map_ejm)
-        self.map_flags = np.zeros(self.n_bins, dtype=np.bool)
-        self.map_idx = np.zeros(self.n_bins, dtype=np.int)
-
-        self.map_ejm[:, 0] = self.initial_ejm
-        self.map_spd[:, 0] = self.initial_spd
+        self.samples = np.zeros((self.map_length, self.map_features))
+        self.map_idx = 0
 
     def handle_dump(self, data):
         user_path = data.request
@@ -150,10 +149,13 @@ class PathMonitor(object):
 
         out = {
             'n_bins': self.n_bins,
-            'map_ejm': self.map_ejm.tolist(),
-            'map_spd': self.map_spd.tolist(),
-            'map_idx': self.map_idx.tolist(),
-            'map_flags': self.map_flags.tolist(),
+            'n_win': self.n_win,
+
+            'length': self.map_length,
+            'features': self.map_features,
+
+            'index': self.map_idx,
+            'samples': self.samples.tolist(),
         }
 
         with open(user_path, 'wt') as jf:
@@ -214,17 +216,16 @@ class PathMonitor(object):
             self.state = S_RUNNING
 
     def handle_status(self, data):
-        if self.state == S_IDLE or data.path_status == PathStatus.PATH_IDLE:
+        if self.state == S_IDLE:
+            return
+
+        if data.path_status == PathStatus.PATH_IDLE:
             return
 
         if data.path_status == PathStatus.PATH_RUNNING:
             return
-        elif data.path_status in (PathStatus.PATH_COMPLETED):
-            self.state = S_IDLE
         else:
-            # navigation failed
             self.state = S_IDLE
-            rospy.logwarn('%s navigation aborted, skipping measurements ...', self.name)
 
     def handle_feedback(self, data):
         if data.name != ACTION_GOTO:
@@ -237,79 +238,82 @@ class PathMonitor(object):
 
 
     def process_nav(self):
-        self.samples_nav = np.roll(self.samples_nav, -1, axis=0)
-        self.samples_energy = np.roll(self.samples_energy, -1)
+        # update sliding window
+        self.win_nav = np.roll(self.win_nav, -1, axis=0)
+        self.win_vel = np.roll(self.win_vel, -1, axis=0)
+        self.win_energy = np.roll(self.win_energy, -1)
 
-        self.samples_nav[-1, :] = np.copy(self.pos)
-        self.samples_energy[-1] = np.copy(self.energy_last)
+        self.win_nav[-1, :] = np.copy(self.pos)
+        self.win_vel[-1, :] = np.copy(self.vel)
+        self.win_energy[-1] = np.copy(self.energy_last)
 
-        if not self.samples_cached:
-            self.samples_cnt += 1
+        # check buffering
+        if not self.win_filled:
+            self.win_cnt += 1
 
-            if self.samples_cnt > self.n_samples:
-                self.samples_cached = True
+            if self.win_cnt > self.n_win:
+                self.win_filled = True
                 rospy.loginfo('%s: initial samples cached, starting estimator ...', self.name)
             else:
                 return
 
-        # check yaw conditions
-        sigma = np.std(self.samples_nav[:, 5])
+        # update features
+        dist = np.sum(np.linalg.norm(np.diff(self.win_nav[:, 0:3], axis=0), axis=1))
+        cvel = np.linalg.norm(self.win_vel[:, 0:3], axis=1)
 
-        if sigma > self.sigma_thresh:
-            return
+        vel_mean = np.mean(cvel)    # vel_mean = dist / (self.n_samples / 10)
+        vel_std = np.std(cvel)
+        yaw_mean = np.mean(self.win_nav[:, 5])
+        yaw_std = np.std(self.win_nav[:, 5])
+        energy = self.win_energy[-1] - self.win_energy[0]
 
-        dist = np.sum(np.linalg.norm(np.diff(self.samples_nav[:, 0:3], axis=0), axis=1))
-        cost = self.samples_energy[-1] - self.samples_energy[0]
+        self.samples[self.map_idx, 0] = rospy.Time.now().to_sec()
+        self.samples[self.map_idx, 1] = energy
+        self.samples[self.map_idx, 2] = yaw_mean
+        self.samples[self.map_idx, 3] = yaw_std
+        self.samples[self.map_idx, 4] = vel_mean
+        self.samples[self.map_idx, 5] = vel_std
+        self.samples[self.map_idx, 6] = dist
 
-        if dist <= 0.0:
-            return
-
-        metric = cost / dist
-
-        if metric <= 0.0:
-            return
-
-        # check spd conditions
-        avg_spd = dist / (self.n_samples / 10)
-
-        if avg_spd < self.speed_thresh or avg_spd > 2.0:
-            return
-
-        #rospy.loginfo('%s: metric: %.3f', self.name, metric)
-
-        # local binning and mode extraction
-        hist, bin_edges = np.histogram(self.samples_nav[:, 5], bins=10)
-        mode = bin_edges[np.argmax(hist)] + (bin_edges[1] - bin_edges[0]) / 2.0
-
-        # direction binning (selecting the yaw sector)
-        #   bins[i-1] <= x < bins[i]
-        curr_bin = np.digitize([mode], self.phi_edges)[0] - 1
-
-        # map update
-        curr_idx = self.map_idx[curr_bin]
-
-        self.map_ejm[curr_bin, curr_idx] = metric
-        self.map_spd[curr_bin, curr_idx] = avg_spd
-
-        # update index
-        next_idx = (self.map_idx[curr_bin] + 1) % self.map_length
-        self.map_idx[curr_bin] = next_idx
-
-        # sliding map
-        if not self.map_flags[curr_bin] and next_idx < curr_idx:
-            self.map_flags[curr_bin] = True
+        self.map_idx = (self.map_idx + 1) % self.map_length
 
     def publish_estimations(self, event=None):
         self.est_ejm = []
         self.est_spd = []
 
         for n in xrange(self.n_bins):
-            b = self.map_length if self.map_flags[n] else self.map_idx[n] + 1
-            ejm = np.mean(self.map_ejm[n, 0:b]).astype(float)
-            spd = np.mean(self.map_spd[n, 0:b]).astype(float)
+            self.est_ejm.append(self.initial_ejm)
+            self.est_spd.append(self.initial_spd)
 
-            self.est_ejm.append(ejm)
-            self.est_spd.append(spd)
+        # # sliding map
+        # if not self.map_flags[curr_bin] and next_idx < curr_idx:
+        #     self.map_flags[curr_bin] = True
+        #
+        # for n in xrange(self.n_bins):
+        #     b = self.map_length if self.map_flags[n] else self.map_idx[n] + 1
+        #     ejm = np.mean(self.map_ejm[n, 0:b]).astype(float)
+        #     spd = np.mean(self.map_spd[n, 0:b]).astype(float)
+        #
+        #     self.est_ejm.append(ejm)
+        #     self.est_spd.append(spd)
+
+        # # local binning and mode extraction
+        # hist, bin_edges = np.histogram(self.samples_nav[:, 5], bins=10)
+        # mode = bin_edges[np.argmax(hist)] + (bin_edges[1] - bin_edges[0]) / 2.0
+        #
+        # # direction binning (selecting the yaw sector)
+        # #   bins[i-1] <= x < bins[i]
+        # curr_bin = np.digitize([mode], self.phi_edges)[0] - 1
+        #
+        # # map update
+        # curr_idx = self.map_idx[curr_bin]
+        #
+        # self.map_ejm[curr_bin, curr_idx] = metric
+        # self.map_spd[curr_bin, curr_idx] = avg_spd
+        #
+        # # update index
+        # next_idx = (self.map_idx[curr_bin] + 1) % self.map_length
+        # self.map_idx[curr_bin] = next_idx
 
         # ros messages
         fa = FloatArrayStamped()
@@ -322,8 +326,6 @@ class PathMonitor(object):
         fa.values = self.est_spd
         self.pub_map_spd.publish(fa)
 
-        rospy.loginfo('%s: ejm: %s', self.name, self.est_ejm)
-
         # # exponential weights
         # weights = np.exp(np.linspace(0, 1, self.n_samples)) / np.exp(1)
         #
@@ -333,7 +335,7 @@ class PathMonitor(object):
 
 def main():
     rospy.init_node('path_monitor')
-    rospy.loginfo('%s: initialization ...', rospy.get_name())
+    rospy.loginfo('%s: init ...', rospy.get_name())
 
     # config
     config = rospy.get_param('saetta/path', {})

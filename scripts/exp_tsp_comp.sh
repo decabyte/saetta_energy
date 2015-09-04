@@ -68,6 +68,8 @@ function vehicle_reset() {
 	
 	rosservice call /pilot/switch "request: false"
 	rosservice call /pilot/fault_control "request: false"
+
+    rosservice call /path/control "command: reset"
 	rosservice call /nav/reset
 }
 
@@ -117,7 +119,7 @@ do
 	TAG="reference"
 
     # adjust water current (fixed)
-    rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.0, 0.0]"
+    rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.0, 0.0, 0.3927, 0.0001]"
 
     # enable recording
     recording_start $TAG $WS
@@ -142,7 +144,7 @@ do
 	TAG="optimal"
 
     # adjust water current (fixed)
-    rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.0, 0.0]"
+    rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.0, 0.0, 0.3927, 0.0001]"
 
     # enable recording
     recording_start $TAG $WS

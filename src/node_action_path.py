@@ -186,7 +186,7 @@ def main():
     # start ros node
     rospy.init_node('node_action_path')
     name = rospy.get_name()
-    rospy.loginfo('%s: init', name)
+    rospy.loginfo('%s: init ...', name)
 
     # init path servers
     sg = GotoPathServer()
