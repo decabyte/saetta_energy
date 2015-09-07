@@ -28,7 +28,7 @@ roslib.load_manifest('saetta_energy')
 from std_srvs.srv import Empty
 
 from auv_msgs.msg import NavSts
-from vehicle_interface.msg import PathRequest, PathStatus, FloatArrayStamped
+from vehicle_interface.msg import PathRequest, PathStatus, FloatArrayStamped, ThrusterFeedback
 from vehicle_interface.srv import StringService, BooleanService, BooleanServiceResponse, StringServiceResponse
 
 from saetta_energy.msg import EnergyReport, EnergyStatus
@@ -39,6 +39,7 @@ TOPIC_NAV = 'nav/nav_sts'
 TOPIC_REQ = 'path/request'
 TOPIC_STS = 'path/status'
 TOPIC_PIL = 'pilot/status'
+TOPIC_THR = 'thrusters/status'
 TOPIC_ENE = 'saetta/report'
 
 TOPIC_MAP_EJM = 'saetta/map/energy'
@@ -56,7 +57,9 @@ S_IDLE = 0
 S_RUNNING = 1
 
 # defaults
-DEFAULT_UPDATE = 5          # secs
+THR_VNOM = 28.0         # volt
+THR_FRAME = 0.1         # secs
+TS_UPDATE = 5           # secs
 ACTION_GOTO = 'goto'
 
 
@@ -81,9 +84,14 @@ class PathMonitor(object):
         self.vel = np.zeros(6)
         self.energy_last = 0.0
 
+        self.thrs_win = int(kwargs.get('thrs_win', 2))
+        self.thrs_current = np.zeros((6, self.thrs_win))
+        self.thrs_energy = np.zeros(6)
+
         # params
         self.n_bins = int(kwargs.get('n_bins', 8))
         self.n_win = int(kwargs.get('n_win', 50))
+        self.use_actions = bool(kwargs.get('use_action', True))
 
         self.sigma_thresh = float(kwargs.get('sigma_phi', np.deg2rad(10.0)))
         self.speed_thresh = float(kwargs.get('speed_thresh', 0.3))
@@ -112,11 +120,10 @@ class PathMonitor(object):
 
         # ros interface
         self.sub_nav = rospy.Subscriber(TOPIC_NAV, NavSts, self.handle_nav, queue_size=10)
-        self.sub_ene = rospy.Subscriber(TOPIC_ENE, EnergyReport, self.handle_energy, queue_size=10)
         self.sub_sts = rospy.Subscriber(TOPIC_STS, PathStatus, self.handle_status, queue_size=10)
+        self.sub_thrs = rospy.Subscriber(TOPIC_THR, ThrusterFeedback, self.handle_thrusters, queue_size=10)
 
-        # listen to actions system
-        self.use_actions = bool(kwargs.get('use_action', True))
+        #self.sub_ene = rospy.Subscriber(TOPIC_ENE, EnergyReport, self.handle_energy, queue_size=10)
 
         if self.use_actions:
             self.sub_feed = rospy.Subscriber(TOPIC_FEED, ActionFeedback, self.handle_feedback, queue_size=10)
@@ -133,10 +140,18 @@ class PathMonitor(object):
         self.srv_switch = rospy.Service(SRV_SWITCH, BooleanService, self.handle_switch)
 
         # timers
-        self.t_upd = rospy.Timer(rospy.Duration(DEFAULT_UPDATE), self.publish_estimations)
+        self.t_upd = rospy.Timer(rospy.Duration(TS_UPDATE), self.publish_estimations)
 
 
     def _init_map(self):
+        # sliding window
+        self.win_nav = np.zeros((self.n_win, 6))
+        self.win_vel = np.zeros((self.n_win, 6))
+        self.win_energy = np.zeros(self.n_win)          # holds energy readings
+        self.win_filled = False                         # check initial window filling
+        self.win_cnt = 0
+
+        # map
         self.samples = np.zeros((self.map_length, self.map_features))
         self.map_idx = 0
 
@@ -183,9 +198,17 @@ class PathMonitor(object):
         rospy.logwarn('%s: resetting estimations and maps ...', self.name)
         return []
 
-    def handle_energy(self, data):
-        """parse energy meter (Wh) and converts to Joules (J = Wh * 3600)"""
-        self.energy_last = data.energy_used * 3600
+    # def handle_energy(self, data):
+    #     """parse energy meter (Wh) and converts to Joules (J = Wh * 3600)"""
+    #     self.energy_last = data.energy_used * 3600
+
+    def handle_thrusters(self, data):
+        """parse thruster data and updated energy meter"""
+        self.thrs_current = np.roll(self.thrs_current, -1, axis=1)
+        self.thrs_current[:, -1] = data.current[0:6]
+
+        self.thrs_energy += THR_VNOM * np.trapz(self.thrs_current, dx=THR_FRAME, axis=1)
+        self.energy_last = np.sum(self.thrs_energy)
 
     def handle_nav(self, data):
         """parse navigation data and update virtual odometer"""
