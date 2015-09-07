@@ -91,7 +91,7 @@ class PathMonitor(object):
         # params
         self.n_bins = int(kwargs.get('n_bins', 8))
         self.n_win = int(kwargs.get('n_win', 50))
-        self.use_actions = bool(kwargs.get('use_action', True))
+        self.use_actions = bool(kwargs.get('use_actions', True))
 
         self.sigma_thresh = float(kwargs.get('sigma_phi', np.deg2rad(10.0)))
         self.speed_thresh = float(kwargs.get('speed_thresh', 0.3))
@@ -230,6 +230,8 @@ class PathMonitor(object):
 
 
     def handle_request(self, data):
+        rospy.loginfo('Received new path request!')
+
         if data.command == PathRequest.CMD_PATH:
             self.state = S_RUNNING
 
