@@ -113,7 +113,7 @@ do
     echo "Setting Water Speed: $WS (m/s)"
 
     # adjust water current (fixed)
-    rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.025, 0.0, $WD, 0.0001]"
+    rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.0025, 0.0, $WD, 0.0001]"
 
     # wait
     sleep 300

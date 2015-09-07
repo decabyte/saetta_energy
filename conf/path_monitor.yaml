@@ -4,10 +4,10 @@
 # energy estimation system developed within the saetta package
 saetta:
   path:
-      n_bins: 8             # int (number of direction bins)
       n_win: 100            # int (sliding window length)
-      n_length: 6000        # int (length of feature map) (10 * 60 secs * 10 samples/sec)
+      n_length: 15000       # int (length of feature map) (10 * 60 secs * 10 samples/sec)
 
+      n_bins: 8             # int (number of direction bins)
       sigma_phi: 6.0        # deg
       speed_thresh: 0.50    # m/s
 
