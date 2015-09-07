@@ -108,22 +108,20 @@ class PathMonitor(object):
         self.win_cnt = 0                                # counter (samples)
 
         # features map
-        self.map_length = int(kwargs.get('n_length', 10 * 60 * 10))     # time duration of sampling window (samples)
+        self.map_length = int(kwargs.get('n_length', 25 * 60 * 10))     # time duration of sampling window (samples)
         self.map_features = 7                                           # number of features (time, energy, yaw, yaw_std, v, v_std, dist)
         self.map_idx = 0                                                # counter (samples)
 
         self._init_map()
 
-        # direction bins
-        self.phi_edges = np.linspace(0.0, 2 * np.pi, self.n_bins + 1) - np.pi
-        self.phi_bins = self.phi_edges[:-1] + ((2 * np.pi / self.n_bins) / 2.0)
+        # # direction bins
+        # self.phi_edges = np.linspace(0.0, 2 * np.pi, self.n_bins + 1) - np.pi
+        # self.phi_bins = self.phi_edges[:-1] + ((2 * np.pi / self.n_bins) / 2.0)
 
         # ros interface
         self.sub_nav = rospy.Subscriber(TOPIC_NAV, NavSts, self.handle_nav, queue_size=10)
         self.sub_sts = rospy.Subscriber(TOPIC_STS, PathStatus, self.handle_status, queue_size=10)
         self.sub_thrs = rospy.Subscriber(TOPIC_THR, ThrusterFeedback, self.handle_thrusters, queue_size=10)
-
-        #self.sub_ene = rospy.Subscriber(TOPIC_ENE, EnergyReport, self.handle_energy, queue_size=10)
 
         if self.use_actions:
             self.sub_feed = rospy.Subscriber(TOPIC_FEED, ActionFeedback, self.handle_feedback, queue_size=10)
@@ -198,9 +196,6 @@ class PathMonitor(object):
         rospy.logwarn('%s: resetting estimations and maps ...', self.name)
         return []
 
-    # def handle_energy(self, data):
-    #     """parse energy meter (Wh) and converts to Joules (J = Wh * 3600)"""
-    #     self.energy_last = data.energy_used * 3600
 
     def handle_thrusters(self, data):
         """parse thruster data and updated energy meter"""
