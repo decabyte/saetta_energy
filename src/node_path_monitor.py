@@ -199,8 +199,8 @@ class PathMonitor(object):
 
     def handle_thrusters(self, data):
         """parse thruster data and updated energy meter"""
-        self.thrs_current = np.roll(self.thrs_current, -1, axis=1)
-        self.thrs_current[:, -1] = data.current[0:6]
+        self.thrs_current = np.roll(self.thrs_current, -1, axis=1)      # roll the vector (shift)
+        self.thrs_current[0:4, -1] = data.current[0:4]                  # selected thrusters only
 
         self.thrs_energy += THR_VNOM * np.trapz(self.thrs_current, dx=THR_FRAME, axis=1)
         self.energy_last = np.sum(self.thrs_energy)
