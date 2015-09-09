@@ -46,7 +46,7 @@ MISSION_RUN = 'run'
 MISSION_COMPLETED = 'completed'
 MISSION_ABORT = 'abort'
 
-DEFAULT_RATE = 1.0      # Hz
+DEFAULT_RATE = 2    # Hz
 
 # actions
 ACT_GOTO = 'goto'
@@ -124,7 +124,7 @@ class MissionExecutor(object):
         self.sub_map_ejm = rospy.Subscriber(TOPIC_MAP_EJM, FloatArrayStamped, self.handle_map_ejm, queue_size=10)
 
         # action interface
-        self.pub_disp = rospy.Publisher(TOPIC_DISPATCH, ActionDispatch, queue_size=10)
+        self.pub_disp = rospy.Publisher(TOPIC_DISPATCH, ActionDispatch, queue_size=1)
         self.sub_feed = rospy.Subscriber(TOPIC_FEEDBACK, ActionFeedback, self.handle_feedback, queue_size=10)
 
         # rate
@@ -159,7 +159,7 @@ class MissionExecutor(object):
 
     def run(self):
         # mission init
-        #rospy.sleep(3.0)
+        rospy.sleep(2.0)
 
         while not rospy.is_shutdown():
             # execute current state
@@ -275,6 +275,7 @@ class MissionExecutor(object):
 
         rospy.loginfo('%s: dispatching action[%d]: %s', self.name, self.action_id, action['name'])
         self.pub_disp.publish(ad)
+
 
     def handle_feedback(self, data):
         if self.action_last is None:

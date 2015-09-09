@@ -79,7 +79,7 @@ function recording_start() {
     pid=$!
 
     # wait a bit to allow the rosbag initialization
-    sleep 1
+    sleep 2
 
     return $pid
 }
@@ -147,7 +147,7 @@ do
     rosservice call /saetta/map/dump "$OUTPUT/map_${TAG}_${WS}.json"
 
     # disable recording
-    sleep 1
+    sleep 2
    	recording_stop
 
     # reset the vehicle state
