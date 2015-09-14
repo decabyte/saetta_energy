@@ -88,7 +88,7 @@ class PathMonitor(object):
 
         # state
         self.state = S_IDLE
-        self.switch = True
+        self.enabled = True
 
         # vehicle
         self.pos = np.zeros(6)
@@ -191,19 +191,19 @@ class PathMonitor(object):
         return StringServiceResponse(result=True, response=user_path)
 
     def handle_switch(self, data):
-        self.switch = data.request
+        self.enabled = data.request
 
         # discard last measurement if disabled
-        if not self.switch:
+        if not self.enabled:
             self.state = S_IDLE
 
-        rospy.logwarn('%s: resetting status: %s', self.name, self.switch)
-        return BooleanServiceResponse(response=self.switch)
+        rospy.logwarn('%s: resetting status: %s', self.name, self.enabled)
+        return BooleanServiceResponse(response=self.enabled)
 
     def handle_reset(self, data=None):
         # disable and clean maps
         self.state = S_IDLE
-        self.switch = True
+        self.enabled = True
 
         self._init_map()
 
@@ -239,7 +239,7 @@ class PathMonitor(object):
             data.orientation_rate.yaw
         ])
 
-        if self.state == S_RUNNING and self.switch:
+        if self.state == S_RUNNING and self.enabled:
             self.process_nav()
 
 
@@ -313,6 +313,9 @@ class PathMonitor(object):
 
 
     def data_regression(self, event=None):
+        if not self.enabled:
+            return
+
         # index selection
         if self.samples[self.map_idx, 0] == 0:
             idx = self.map_idx
