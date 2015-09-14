@@ -63,6 +63,17 @@ TS_UPDATE = 5           # secs
 ACTION_GOTO = 'goto'
 
 
+import scipy as sci
+import scipy.optimize
+
+import sklearn as sk
+import sklearn.metrics
+
+# curve_fit support function
+def poly(x, *args):
+    return np.polyval(args, x)
+
+
 class CustomEncoder(json.JSONEncoder):
     """http://stackoverflow.com/questions/8230315/python-sets-are-not-json-serializable"""
     def default(self, obj):
@@ -95,10 +106,12 @@ class PathMonitor(object):
 
         self.sigma_thresh = float(kwargs.get('sigma_phi', np.deg2rad(10.0)))
         self.speed_thresh = float(kwargs.get('speed_thresh', 0.3))
-        self.dist_thresh = float(kwargs.get('dist_thresh', 1.0))
 
-        self.initial_ejm = float(kwargs.get('initial_ejm', 100.0))
+        self.initial_ejm = float(kwargs.get('initial_ejm', 70.0))
         self.initial_spd = float(kwargs.get('initial_spd', 0.5))
+
+        self.est_ejm = [0, self.initial_ejm]
+        self.est_spd = [0, self.initial_spd]
 
         # sliding window
         self.win_nav = np.zeros((self.n_win, 6))        # holds nav samples
@@ -139,6 +152,7 @@ class PathMonitor(object):
 
         # timers
         self.t_upd = rospy.Timer(rospy.Duration(TS_UPDATE), self.publish_estimations)
+        self.t_reg = rospy.Timer(rospy.Duration(10), self.data_regression)
 
 
     def _init_map(self):
@@ -297,44 +311,62 @@ class PathMonitor(object):
 
         self.map_idx = (self.map_idx + 1) % self.map_length
 
+
+    def data_regression(self, event=None):
+        # index selection
+        if self.samples[self.map_idx, 0] == 0:
+            idx = self.map_idx
+
+            if self.map_idx < 100:
+                return
+        else:
+            idx = -1
+
+        # samples selection
+        #   a) select only measuread values
+        #   b) filter values based on vel_std and yaw_std thresholds
+        #   c) select valid samples from measures
+        measures = self.samples[:idx, :]
+        cond = np.logical_and(measures[:, 5] < 0.05, measures[:, 3] < 0.2)
+        valid = measures[cond, :]
+
+        # compute metric (energy / distance)
+        ejm = valid[:, 1] / valid[:, 6]
+
+        # fit quality estimator
+        mse = sklearn.metrics.mean_squared_error
+        prev_e = np.inf
+        prev_s = np.inf
+
+        # yaw vs ejm
+        for n in (3, 5, 7):
+            popt_e, pcov_e = sci.optimize.curve_fit(poly, valid[:, 2], ejm, p0=np.ones(n))
+            emse_e = mse(ejm, poly(valid[:, 2], *popt_e))
+
+            if emse_e >= prev_e:
+                break
+            else:
+                prev_e = emse_e
+
+        # yaw vs spd
+        for n in (3, 5, 7):
+            popt_s, pcov_s = sci.optimize.curve_fit(poly, valid[:, 2], valid[:, 4], p0=np.ones(n))
+            emse_s = mse(valid[:, 4], poly(valid[:, 2], *popt_e))
+
+            if emse_s >= prev_s:
+                break
+            else:
+                prev_s = emse_s
+
+        # store coefficients
+        self.est_ejm = np.copy(popt_e)
+        self.est_spd = np.copy(popt_s)
+
+        rospy.loginfo('%s: data fitting ejm: degree: %d, mse: %.3f', self.name, len(popt_e), emse_e)
+        rospy.loginfo('%s: data fitting spd: degree: %d, mse: %.3f', self.name, len(popt_s), emse_s)
+
+
     def publish_estimations(self, event=None):
-        self.est_ejm = []
-        self.est_spd = []
-
-        for n in xrange(self.n_bins):
-            self.est_ejm.append(self.initial_ejm)
-            self.est_spd.append(self.initial_spd)
-
-        # # sliding map
-        # if not self.map_flags[curr_bin] and next_idx < curr_idx:
-        #     self.map_flags[curr_bin] = True
-        #
-        # for n in xrange(self.n_bins):
-        #     b = self.map_length if self.map_flags[n] else self.map_idx[n] + 1
-        #     ejm = np.mean(self.map_ejm[n, 0:b]).astype(float)
-        #     spd = np.mean(self.map_spd[n, 0:b]).astype(float)
-        #
-        #     self.est_ejm.append(ejm)
-        #     self.est_spd.append(spd)
-
-        # # local binning and mode extraction
-        # hist, bin_edges = np.histogram(self.samples_nav[:, 5], bins=10)
-        # mode = bin_edges[np.argmax(hist)] + (bin_edges[1] - bin_edges[0]) / 2.0
-        #
-        # # direction binning (selecting the yaw sector)
-        # #   bins[i-1] <= x < bins[i]
-        # curr_bin = np.digitize([mode], self.phi_edges)[0] - 1
-        #
-        # # map update
-        # curr_idx = self.map_idx[curr_bin]
-        #
-        # self.map_ejm[curr_bin, curr_idx] = metric
-        # self.map_spd[curr_bin, curr_idx] = avg_spd
-        #
-        # # update index
-        # next_idx = (self.map_idx[curr_bin] + 1) % self.map_length
-        # self.map_idx[curr_bin] = next_idx
-
         # ros messages
         fa = FloatArrayStamped()
         fa.header.stamp = rospy.Time.now()
@@ -346,12 +378,6 @@ class PathMonitor(object):
         fa.values = self.est_spd
         self.pub_map_spd.publish(fa)
 
-        # # exponential weights
-        # weights = np.exp(np.linspace(0, 1, self.n_samples)) / np.exp(1)
-        #
-        # # weighted average
-        # self.est_ejm = np.average(self.map_ejm, weights=weights, axis=1).flatten()
-        # self.est_spd = np.average(self.map_spd, weights=weights, axis=1).flatten()
 
 def main():
     rospy.init_node('path_monitor')

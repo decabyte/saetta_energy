@@ -32,7 +32,9 @@ from vehicle_interface.srv import BooleanService, PathService, PathServiceReques
 TOPIC_NAV = 'nav/nav_sts'
 TOPIC_PILOT_STS = 'pilot/status'
 TOPIC_ENERGY = 'saetta/report'
-TOPIC_MAP_EJM = 'saetta/map/energy'
+
+TOPIC_EJM = 'saetta/map/energy'
+TOPIC_SPD = 'saetta/map/speed'
 
 TOPIC_PATH_REQ = 'path/request'
 TOPIC_PATH_STS = 'path/status'
@@ -64,18 +66,17 @@ class MissionExecutor(object):
         self.plan_id = 0
         self.ips_dict = []
         self.actions = []
+        self.route_optimization = False
+
+        self.initial_ejm = float(rospy.get_param('saetta/path/initial_ejm', 70.0))  # navigation cost (J/m)
+        self.initial_spd = float(rospy.get_param('saetta/path/initial_spd', 0.75))  # cruise speed (m/s)
+        self.est_acc = float(rospy.get_param('saetta/path/est_acc', 0.125))         # vehicle acceleration (m/s^2)
+        self.est_dec = float(rospy.get_param('saetta/path/est_dec', 0.125))         # vehicle deceleration (m/s^2)
 
         # estimation config
-        self.n_bins = int(rospy.get_param('saetta/path/n_bins', 8))                 # number of direction bins
-        self.initial_ejm = float(rospy.get_param('saetta/path/initial_ejm', 70.0))  # navigation cost (J/m)
-        self.map_ejm = self.initial_ejm * np.ones(self.n_bins)                      # map of navigation costs
-        self.route_optimization = False
-        self.energy_trans = float(rospy.get_param('saetta/path/energy_trans', 200.0))   # start & stop constant (empirically measured, Joules)
-
-        # update bins and add some slack
-        self.phi_edges = np.linspace(-np.pi, np.pi, self.n_bins + 1)                # direction bins (edges)
-        self.phi_edges[0] -= 0.001
-        self.phi_edges[-1] += 0.001
+        self.ejm_coeff = [0, self.initial_ejm]          # linear
+        self.spd_coeff = [0, self.initial_spd]          # linear
+        self.cost_offset = 0.5                          # small epsilon for adjusting the tsp problem
 
         # mission state machine
         self.mission_state = MISSION_IDLE
@@ -121,7 +122,9 @@ class MissionExecutor(object):
         # ros interface
         self.sub_nav = rospy.Subscriber(TOPIC_NAV, NavSts, self.handle_nav, queue_size=10)
         self.sub_energy = rospy.Subscriber(TOPIC_ENERGY, EnergyReport, self.handle_energy, queue_size=10)
-        self.sub_map_ejm = rospy.Subscriber(TOPIC_MAP_EJM, FloatArrayStamped, self.handle_map_ejm, queue_size=10)
+
+        self.sub_ejm = rospy.Subscriber(TOPIC_EJM, FloatArrayStamped, self.handle_ejm, queue_size=10)
+        self.sub_spd = rospy.Subscriber(TOPIC_SPD, FloatArrayStamped, self.handle_spd, queue_size=10)
 
         # action interface
         self.pub_disp = rospy.Publisher(TOPIC_DISPATCH, ActionDispatch, queue_size=1)
@@ -145,16 +148,11 @@ class MissionExecutor(object):
     def handle_energy(self, data):
         self.energy_last = data.energy_used
 
-    def handle_map_ejm(self, data):
-        # support change in the map (assuming linear spacing from -pi to pi)
-        self.map_ejm = np.array(data.values)
+    def handle_ejm(self, data):
+        self.ejm_coeff = np.array(data.values)
 
-        if len(data.values) != self.n_bins:
-            # update bins and add some slack
-            self.n_bins = len(data.values)
-            self.phi_edges = np.linspace(-np.pi, np.pi, self.n_bins + 1)
-            self.phi_edges[0] -= 0.001
-            self.phi_edges[-1] += 0.001
+    def handle_spd(self, data):
+        self.spd_coeff = np.array(data.values)
 
 
     def run(self):
@@ -221,10 +219,13 @@ class MissionExecutor(object):
             return
 
         # evaluate residuals
-        hops_costs, _ = self._calculate_cost_route(self.route[self.hop_counter:])
-        prev_cost = self.route_cost_hops[self.hop_counter:]
+        hops_costs, hops_times = self._analyse_route(self.route[self.hop_counter:])
 
-        rospy.loginfo('%s: residual updates:\n  prev: %s\n  new: %s', self.name, sum(prev_cost), sum(hops_costs))
+        prev_costs = self.plan_cost_hops[self.hop_counter:]
+        prev_times = self.plan_time_hops[self.hop_counter:]
+
+        rospy.loginfo('%s: energy residual updates: prev: %.2f J -- new: %.2f J', self.name, sum(prev_costs), sum(hops_costs))
+        rospy.loginfo('%s: time residual updates: prev: %.2f s -- new: %.2f s', self.name, sum(prev_times), sum(hops_times))
 
         # # (ip achieved) calculate remaining inspection points
         # ips_togo = [ip for ip, s in self.ips_state.iteritems() if s == 0]
@@ -382,26 +383,36 @@ class MissionExecutor(object):
         dist = tt.distance_between(wp_a, wp_b, spacing_dim=3)
 
         yaw_los = tt.calculate_orientation(wp_a, wp_b)
-        yaw_idx = np.digitize([yaw_los], self.phi_edges)[0] - 1
+        cost = np.polyval(self.ejm_coeff, yaw_los) * dist + self.cost_offset
 
-        if yaw_idx >= 0 and yaw_idx < self.n_bins:
-            cost = self.map_ejm[yaw_idx] * dist + self.energy_trans
-        else:
-            rospy.logwarn('%s: binning failed, using default cost (yaw_los: %.2f, yaw_idx: %d, n_bins: %d)', self.name, yaw_los, yaw_idx, self.n_bins)
-            cost = self.initial_ejm * dist
+        if cost <= 0:
+            cost = self.initial_ejm * dist + self.cost_offset
 
         return cost
 
-    def _calculate_cost_route(self, route):
+    def _calculate_time_hop(self, wp_a, wp_b):
+        dist = tt.distance_between(wp_a, wp_b, spacing_dim=3)
+
+        yaw_los = tt.calculate_orientation(wp_a, wp_b)
+        vc = np.polyval(self.spd_coeff, yaw_los)
+
+        time = (0.5 * (vc / self.est_acc)) + (dist / vc) + (0.5 * (vc / self.est_dec))
+        time = np.maximum(time, 10.0)
+
+        return time
+
+    def _analyse_route(self, route):
         cost_hops = []
+        time_hops = []
 
         for n in xrange(len(route)):
             wp_a = self.ips_dict[route[n - 1]]
             wp_b = self.ips_dict[route[n]]
 
             cost_hops.append(self._calculate_cost_hop(wp_a, wp_b))
+            time_hops.append(self._calculate_time_hop(wp_a, wp_b))
 
-        return cost_hops, sum(cost_hops)
+        return cost_hops, time_hops
 
 
     def _plan_tsp(self, labels):
@@ -451,11 +462,15 @@ class MissionExecutor(object):
 
     def _plan(self, labels):
         # plan route
-        self.route, self.route_cost_hops, self.route_cost_tot = self._plan_tsp(labels)
+        self.route, _, _ = self._plan_tsp(labels)
+        cost_hops, time_hops = self._analyse_route(self.route)
+
         rospy.loginfo('%s: found inspection route:\n%s', self.name, self.route)
 
         # route monitor
         self.hop_counter = 0
+        self.plan_cost_hops = cost_hops
+        self.plan_time_hops = time_hops
 
         # generate action sequence
         self.actions = []
@@ -498,7 +513,8 @@ class MissionExecutor(object):
                 'params': {
                     'pose': [self.ips_dict[self.route[n]].tolist()]
                 },
-                'cost': self.route_cost_hops[n],
+                'cost': cost_hops[n],
+                'duration': time_hops[n],
             })
 
             if n < len(self.route) - 1:
@@ -522,8 +538,10 @@ class MissionExecutor(object):
             'time': time.time(),
             'ips_count': len(labels),
             'route': self.route,
-            'cost_hops': self.route_cost_hops,
-            'cost_total': self.route_cost_tot,
+            'cost_hops': cost_hops,
+            'cost_total': sum(cost_hops),
+            'time_hops': time_hops,
+            'time_tot': sum(time_hops),
             'actions': self.actions,
         }
 
@@ -595,11 +613,11 @@ def main():
 
     # add initial wait for maps
     try:
-        rospy.wait_for_message(TOPIC_MAP_EJM, FloatArrayStamped, timeout=5)
+        rospy.wait_for_message(TOPIC_EJM, FloatArrayStamped, timeout=5)
     except rospy.ROSException:
         rospy.logwarn('%s: no map received proceeding with internal estimation ...', rospy.get_name())
     else:
-        rospy.loginfo('%s: received initial estimation:\n%s', rospy.get_name(), me.map_ejm)
+        rospy.loginfo('%s: received initial estimation:\n%s', rospy.get_name(), me.ejm_coeff)
 
     # setup the mission
     me.execute_mission(config)

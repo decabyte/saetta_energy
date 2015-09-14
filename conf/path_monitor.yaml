@@ -5,7 +5,7 @@
 saetta:
   path:
       n_win: 100            # int (sliding window length)
-      n_length: 15000       # int (length of feature map) (10 * 60 secs * 10 samples/sec)
+      n_length: 15000       # int (length of feature map, samples)
 
       n_bins: 8             # int (number of direction bins)
       sigma_phi: 6.0        # deg
