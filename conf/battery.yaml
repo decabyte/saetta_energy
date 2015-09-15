@@ -1,0 +1,37 @@
+# battery model
+
+## Cb model is taken from the inversion of:
+#   e_batt = 0.5 * C * Vmax^2 - 0.5 * C * Vmin^2
+#   Vmin, Vmax = 3.1, 4.2 V   for a typical Li-Ion Cell
+
+saetta:
+  battery:
+    # nessie vii (48Wh or 12.6Ah according to versions)
+    #
+    #   emax: 48.0 Wh * 3600 s
+    #   emax: 12.6 Ah * 3.7 V * 3600 s
+    #
+    #   Cbe: (2 * emax) / ((vmax**2) - (vmin**2))
+
+    n_packs: 4
+    vmax: 4.2
+    vmin: 3.1
+
+    emax: 172800.0
+    cbe: 43038.0
+
+    Cb: 86.08e3
+    Re: 7.7e-3
+    Rt: 15.4e-3
+    Rc: 0.4e-3
+    Cc: 4.074e3
+
+    # nessie viii
+    # emax = 2.9 * 3.7 * 3600
+    # Cb = (2 * emax) / ((4.2**2) - (3.1**2))
+    #
+    # Cb = Cb * 2.0
+    # Re = 1.1e-3 * 7.0  # 1.1e-3
+    # Rt = 2.2e-3 * 7.0  # 2.2e-3
+    # Rc = 0.4e-3
+    # Cc = 4.074e3

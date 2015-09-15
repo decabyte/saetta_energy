@@ -1,0 +1,9 @@
+<launch>
+
+    <!-- load the config and start the monitor -->
+    <rosparam command="delete" param="/saetta/battery"/>
+    <rosparam command="load" file="$(find saetta_energy)/conf/battery.yaml"/>
+
+    <node name="battery_node" pkg="saetta_energy" type="node_battery.py" args="" output="screen" />
+
+</launch>

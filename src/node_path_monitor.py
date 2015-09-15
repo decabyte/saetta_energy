@@ -4,21 +4,10 @@ from __future__ import division
 
 import os
 import json
-import time
-import datetime
 import collections
 
 import numpy as np
-import scipy as sci
-import scipy.interpolate
-
 np.set_printoptions(precision=3, suppress=True)
-
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-
-mpl.style.use('bmh')
-mpl.rcParams['figure.figsize'] = (8, 8)
 
 # ros imports
 import rospy
@@ -28,10 +17,10 @@ roslib.load_manifest('saetta_energy')
 from std_srvs.srv import Empty
 
 from auv_msgs.msg import NavSts
-from vehicle_interface.msg import PathRequest, PathStatus, FloatArrayStamped, ThrusterFeedback
+from vehicle_interface.msg import PathRequest, PathStatus, ThrusterFeedback
 from vehicle_interface.srv import StringService, BooleanService, BooleanServiceResponse, StringServiceResponse
 
-from saetta_energy.msg import EnergyReport, EnergyStatus
+from saetta_energy.msg import EnergyReport, EnergyStatus, RegressionResult
 from actionbus.msg import ActionFeedback, ActionDispatch
 
 # topics
@@ -112,6 +101,8 @@ class PathMonitor(object):
 
         self.est_ejm = [0, self.initial_ejm]
         self.est_spd = [0, self.initial_spd]
+        self.mse_ejm = np.inf
+        self.mse_spd = np.inf
 
         # sliding window
         self.win_nav = np.zeros((self.n_win, 6))        # holds nav samples
@@ -142,8 +133,8 @@ class PathMonitor(object):
             self.sub_req = rospy.Subscriber(TOPIC_REQ, PathRequest, self.handle_request, queue_size=10)
 
         # maps interface
-        self.pub_map_ejm = rospy.Publisher(TOPIC_MAP_EJM, FloatArrayStamped, queue_size=10, latch=True)
-        self.pub_map_spd = rospy.Publisher(TOPIC_MAP_SPD, FloatArrayStamped, queue_size=10, latch=True)
+        self.pub_map_ejm = rospy.Publisher(TOPIC_MAP_EJM, RegressionResult, queue_size=10, latch=True)
+        self.pub_map_spd = rospy.Publisher(TOPIC_MAP_SPD, RegressionResult, queue_size=10, latch=True)
 
         # services
         self.srv_reset = rospy.Service(SRV_RESET, Empty, self.handle_reset)
@@ -348,38 +339,42 @@ class PathMonitor(object):
 
             if emse_e >= prev_e:
                 break
-            else:
-                prev_e = emse_e
+
+            prev_e = emse_e
+            self.est_ejm = np.copy(popt_e)
+            self.mse_ejm = emse_e
 
         # yaw vs spd
         for n in (3, 5, 7):
             popt_s, pcov_s = sci.optimize.curve_fit(poly, valid[:, 2], valid[:, 4], p0=np.ones(n))
-            emse_s = mse(valid[:, 4], poly(valid[:, 2], *popt_e))
+            emse_s = mse(valid[:, 4], poly(valid[:, 2], *popt_s))
 
             if emse_s >= prev_s:
                 break
-            else:
-                prev_s = emse_s
 
-        # store coefficients
-        self.est_ejm = np.copy(popt_e)
-        self.est_spd = np.copy(popt_s)
+            prev_s = emse_s
+            self.est_spd = np.copy(popt_s)
+            self.mse_spd = emse_s
 
-        rospy.loginfo('%s: data fitting ejm: degree: %d, mse: %.3f', self.name, len(popt_e), emse_e)
-        rospy.loginfo('%s: data fitting spd: degree: %d, mse: %.3f', self.name, len(popt_s), emse_s)
+        rospy.loginfo('%s: data fitting ejm: degree: %d, mse: %.3f', self.name, len(self.est_ejm), self.mse_ejm)
+        rospy.loginfo('%s: data fitting spd: degree: %d, mse: %.3f', self.name, len(self.est_spd), self.mse_spd)
 
 
     def publish_estimations(self, event=None):
         # ros messages
-        fa = FloatArrayStamped()
-        fa.header.stamp = rospy.Time.now()
-        fa.values = self.est_ejm
-        self.pub_map_ejm.publish(fa)
+        res = RegressionResult()
+        res.header.stamp = rospy.Time.now()
+        res.type = 'poly'
+        res.coeff = self.est_ejm
+        res.mse = self.mse_ejm
+        self.pub_map_ejm.publish(res)
 
-        fa = FloatArrayStamped()
-        fa.header.stamp = rospy.Time.now()
-        fa.values = self.est_spd
-        self.pub_map_spd.publish(fa)
+        res = RegressionResult()
+        res.header.stamp = rospy.Time.now()
+        res.type = 'poly'
+        res.coeff = self.est_spd
+        res.mse = self.mse_spd
+        self.pub_map_spd.publish(res)
 
 
 def main():

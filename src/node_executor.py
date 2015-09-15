@@ -23,11 +23,8 @@ from vehicle_core.path import trajectory_tools as tt
 
 from diagnostic_msgs.msg import KeyValue
 from actionbus.msg import ActionDispatch, ActionFeedback
-from saetta_energy.msg import EnergyReport, EnergyStatus
-
+from saetta_energy.msg import EnergyReport, RegressionResult
 from auv_msgs.msg import NavSts
-from vehicle_interface.msg import PathRequest, PathStatus, PilotStatus, Vector6, FloatArrayStamped
-from vehicle_interface.srv import BooleanService, PathService, PathServiceRequest, PathServiceResponse
 
 TOPIC_NAV = 'nav/nav_sts'
 TOPIC_PILOT_STS = 'pilot/status'
@@ -76,6 +73,8 @@ class MissionExecutor(object):
         # estimation config
         self.ejm_coeff = [0, self.initial_ejm]          # linear
         self.spd_coeff = [0, self.initial_spd]          # linear
+        self.ejm_rmse = self.initial_ejm / 4.0          # initial rmse
+        self.spd_rmse = self.initial_spd / 4.0          # initial rmse
         self.cost_offset = 0.5                          # small epsilon for adjusting the tsp problem
 
         # mission state machine
@@ -123,8 +122,8 @@ class MissionExecutor(object):
         self.sub_nav = rospy.Subscriber(TOPIC_NAV, NavSts, self.handle_nav, queue_size=10)
         self.sub_energy = rospy.Subscriber(TOPIC_ENERGY, EnergyReport, self.handle_energy, queue_size=10)
 
-        self.sub_ejm = rospy.Subscriber(TOPIC_EJM, FloatArrayStamped, self.handle_ejm, queue_size=10)
-        self.sub_spd = rospy.Subscriber(TOPIC_SPD, FloatArrayStamped, self.handle_spd, queue_size=10)
+        self.sub_ejm = rospy.Subscriber(TOPIC_EJM, RegressionResult, self.handle_ejm, queue_size=10)
+        self.sub_spd = rospy.Subscriber(TOPIC_SPD, RegressionResult, self.handle_spd, queue_size=10)
 
         # action interface
         self.pub_disp = rospy.Publisher(TOPIC_DISPATCH, ActionDispatch, queue_size=1)
@@ -149,11 +148,12 @@ class MissionExecutor(object):
         self.energy_last = data.energy_used
 
     def handle_ejm(self, data):
-        self.ejm_coeff = np.array(data.values)
+        self.ejm_coeff = np.array(data.coeff)
+        self.ejm_rmse = np.sqrt(data.mse)
 
     def handle_spd(self, data):
-        self.spd_coeff = np.array(data.values)
-
+        self.spd_coeff = np.array(data.coeff)
+        self.spd_rmse = np.sqrt(data.mse)
 
     def run(self):
         # mission init
@@ -189,7 +189,7 @@ class MissionExecutor(object):
         elif self.action_state == ActionFeedback.ACTION_SUCCESS:
             rospy.loginfo('%s: action %d completed, continuing mission ...', self.name, self.action_id)
 
-            self.evaluate_action_result()
+            self._success_callback()
             self.mission_state = MISSION_IDLE
         else:
             pass
@@ -203,13 +203,12 @@ class MissionExecutor(object):
         rospy.signal_shutdown('mission completed')
 
 
-    def evaluate_action_result(self):
-        if self.action_current['name'] != 'hover':
-            self.action_id += 1
-            return
-
+    def _success_callback(self):
         # increment action counter
         self.action_id += 1
+
+        if self.action_current['name'] != 'hover':
+            return
 
         # mark inspection point as visited
         try:
@@ -613,7 +612,7 @@ def main():
 
     # add initial wait for maps
     try:
-        rospy.wait_for_message(TOPIC_EJM, FloatArrayStamped, timeout=5)
+        rospy.wait_for_message(TOPIC_EJM, RegressionResult, timeout=5)
     except rospy.ROSException:
         rospy.logwarn('%s: no map received proceeding with internal estimation ...', rospy.get_name())
     else:

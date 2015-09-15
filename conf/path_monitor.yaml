@@ -7,11 +7,8 @@ saetta:
       n_win: 100            # int (sliding window length)
       n_length: 15000       # int (length of feature map, samples)
 
-      n_bins: 8             # int (number of direction bins)
-      sigma_phi: 6.0        # deg
-      speed_thresh: 0.50    # m/s
-
       initial_ejm: 70.0     # J/m (initial energy performance)
       initial_spd: 0.75     # m/s (initial average speed)
 
-      energy_trans: 10.0    # J (start and stop energy offset, empirically measured)
+      sigma_phi: 6.0        # deg
+      speed_thresh: 0.50    # m/s

@@ -181,9 +181,9 @@ if __name__ == '__main__':
     rospy.loginfo('%s initializing ...', name)
 
     # load parameters
-    ts_update = float(rospy.get_param('~ts_update', TS_UPDATE))               # sec
-    ts_publish = float(rospy.get_param('~ts_publish', TS_PUBLISH))            # sec
-    battery_capacity = float(rospy.get_param('~battery_capacity', DEFAULT_BAT))   # battery capacity (watt-hours)
+    ts_update = float(rospy.get_param('~ts_update', TS_UPDATE))                     # sec
+    ts_publish = float(rospy.get_param('~ts_publish', TS_PUBLISH))                  # sec
+    battery_capacity = float(rospy.get_param('~battery_capacity', DEFAULT_BAT))     # battery capacity (watt-hours)
 
     # parse args
     #args = rospy.myargv()
