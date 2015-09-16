@@ -13,7 +13,10 @@ saetta:
     #
     #   Cbe: (2 * emax) / ((vmax**2) - (vmin**2))
 
-    n_packs: 4
+    n_win: 100
+    n_parallel: 4
+    n_series: 7
+
     vmax: 4.2
     vmin: 3.1
 

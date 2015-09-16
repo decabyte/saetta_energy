@@ -7,4 +7,5 @@ float64 energy_max              # battery system maximum energy
 float64 energy_residual         # battery system residual energy
 float64 soc                     # state of charge
 
-float64 energy_std              # estimation std
+float64 voltage                 # filtered output voltage
+float64 current                 # measured current

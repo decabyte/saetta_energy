@@ -18,14 +18,14 @@ from vehicle_interface.msg import ThrusterFeedback
 
 # topics
 TOPIC_THR = 'thrusters/status'
-TOPIC_ENE = 'saetta/report'
+TOPIC_ENE = 'saetta/energy'
 TOPIC_BAT = 'saetta/battery'
 SRV_RESET = 'saetta/battery/reset'
 
 # defaults
 THR_VNOM = 28.0         # volt
 THR_FRAME = 0.1         # secs
-TS_UPDATE = 5           # secs
+TS_UPDATE = 1           # secs
 
 
 class BatteryNode(object):
@@ -35,13 +35,12 @@ class BatteryNode(object):
         self.dt = 0.1
 
         # thrusters
-        self.n_win = int(kwargs.get('n_win', 100))
-        self.thrs_currents = np.zeros(self.n_win)
-        self.thrs_idx = 0
+        #self.n_win = int(kwargs.get('n_win', 100))
+        #self.thrs_currents = np.zeros(self.n_win)
 
         # battery model
-        self.n_packs = float(kwargs.get('n_packs', 4))
-        self.cell_series = int(kwargs.get('cell_series', 7))
+        self.n_series = int(kwargs.get('n_series', 7))
+        self.n_parallel = float(kwargs.get('n_parallel', 4))
 
         self.emax = float(kwargs.get('emax', 172800.0))
         self.vmax = float(kwargs.get('vmax', 4.2))
@@ -49,9 +48,11 @@ class BatteryNode(object):
         self.cbe = float(kwargs.get('cbe', 43038.0))
 
         # pack
-        self.energy_max = self.emax * self.n_packs
+        self.energy_max = self.emax * self.n_parallel
         self.energy_residual = np.copy(self.energy_max)
         self.soc = 1.0
+        self.vbat = self.vmax * self.n_series
+        self.amps = 0.0
 
         # parameters
         Cb = float(kwargs.get('Cb', 86.08e3))
@@ -81,7 +82,16 @@ class BatteryNode(object):
 
         # system (single-cell model)
         self.sys = control.ss(A, B, C, D)
-        self.x0 = self.vmax
+        self.dsys = control.matlab.c2d(self.sys, self.dt)
+
+        self.Ad = self.dsys.A
+        self.Bd = self.dsys.B
+        self.Cd = self.dsys.C
+        self.Dd = self.dsys.D
+
+        self.x = np.zeros((A.shape[0], 1))
+        self.y = np.zeros((1, 1))
+        self.x[:] = self.vmax
 
         # ros interface
         self.sub_thrs = rospy.Subscriber(TOPIC_THR, ThrusterFeedback, self.handle_thrusters, queue_size=10)
@@ -97,7 +107,7 @@ class BatteryNode(object):
     def handle_reset(self, data=None):
         rospy.logwarn('%s: resetting estimations', self.name)
 
-        self.x0 = self.vmax
+        self.x[:] = self.vmax
         self.energy_residual = np.copy(self.energy_max)
         self.soc = 1.0
 
@@ -105,42 +115,28 @@ class BatteryNode(object):
 
     def handle_thrusters(self, data):
         # selected thrusters only
-        self.thrs_currents = np.roll(self.thrs_currents, -1)
-        self.thrs_currents[-1] = np.sum(data.current[0:4]) / self.n_packs
+        self.amps = np.sum(data.current[0:4])
 
-        self.thrs_idx += 1
+        # discrete-time state space model
+        self.u = self.amps / self.n_parallel
+        x = np.copy(self.x)
 
-        if self.thrs_idx > self.n_win:
-            self.update_state()
-
-            self.thrs_idx = 0
-            self.thrs_currents = np.zeros(self.n_win)
-
-    def update_state(self):
-        # support vectors
-        t = np.arange(0.0, self.n_win * self.dt, self.dt)
-        u = self.thrs_currents
-        x0 = self.x0
-
-        # simulation
-        t, yout, xout = control.forced_response(self.sys, t, u, x0)
-
-        # save state
-        self.x0 = xout[:, -1]
+        self.x = np.dot(self.Ad, x) + np.dot(self.Bd, self.u)
+        self.y = np.dot(self.Cd, x) + np.dot(self.Dd, self.u)
 
         # update capacity
-        vcb = xout[0, -1]
+        vcb = self.x[0, 0]
         eres = 0.5 * self.cbe * ((vcb ** 2) - (self.vmin ** 2))
 
-        self.energy_residual = eres * self.n_packs
+        self.energy_residual = eres * self.n_parallel
         self.soc = self.energy_residual / self.energy_max
-        self.vbat = yout[-1] * self.cell_series
+        self.vbat = self.y * self.n_series
 
         # clipping
         self.energy_residual = np.clip(self.energy_residual, 0.0, self.energy_max)
         self.soc = np.clip(self.soc, 0.0, 1.0)
 
-        #rospy.loginfo('%s: vcb: %.3f, soc: %.3f', self.name, vcb, self.soc * 100)
+        #rospy.loginfo('%s: state: %s, output: %s', self.name, self.x, self.y)
 
     def publish_state(self, event=None):
         # ros messages
@@ -149,6 +145,9 @@ class BatteryNode(object):
         res.energy_max = self.energy_max
         res.energy_residual = self.energy_residual
         res.soc = self.soc
+        res.voltage = self.vbat
+        res.current = self.amps
+
         self.pub_sts.publish(res)
 
 def main():
