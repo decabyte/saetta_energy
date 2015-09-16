@@ -23,13 +23,13 @@ from vehicle_core.path import trajectory_tools as tt
 
 from diagnostic_msgs.msg import KeyValue
 from actionbus.msg import ActionDispatch, ActionFeedback
-from saetta_energy.msg import EnergyReport, RegressionResult
+from saetta_energy.msg import BatteryStatus, RegressionResult
 from auv_msgs.msg import NavSts
 
 TOPIC_NAV = 'nav/nav_sts'
 TOPIC_PILOT_STS = 'pilot/status'
-TOPIC_ENERGY = 'saetta/report'
 
+TOPIC_BAT = 'saetta/battery'
 TOPIC_EJM = 'saetta/map/energy'
 TOPIC_SPD = 'saetta/map/speed'
 
@@ -120,7 +120,7 @@ class MissionExecutor(object):
 
         # ros interface
         self.sub_nav = rospy.Subscriber(TOPIC_NAV, NavSts, self.handle_nav, queue_size=10)
-        self.sub_energy = rospy.Subscriber(TOPIC_ENERGY, EnergyReport, self.handle_energy, queue_size=10)
+        self.sub_bat = rospy.Subscriber(TOPIC_BAT, BatteryStatus, self.handle_battery, queue_size=10)
 
         self.sub_ejm = rospy.Subscriber(TOPIC_EJM, RegressionResult, self.handle_ejm, queue_size=10)
         self.sub_spd = rospy.Subscriber(TOPIC_SPD, RegressionResult, self.handle_spd, queue_size=10)
@@ -144,8 +144,8 @@ class MissionExecutor(object):
             data.orientation.yaw
         ])
 
-    def handle_energy(self, data):
-        self.energy_last = data.energy_used
+    def handle_battery(self, data):
+        self.energy_last = data.energy_max - data.energy_residual
 
     def handle_ejm(self, data):
         self.ejm_coeff = np.array(data.coeff)
