@@ -356,8 +356,8 @@ class PathMonitor(object):
             self.est_spd = np.copy(popt_s)
             self.mse_spd = emse_s
 
-        rospy.loginfo('%s: data fitting ejm: degree: %d, mse: %.3f', self.name, len(self.est_ejm), self.mse_ejm)
-        rospy.loginfo('%s: data fitting spd: degree: %d, mse: %.3f', self.name, len(self.est_spd), self.mse_spd)
+        #rospy.loginfo('%s: data fitting ejm: degree: %d, mse: %.3f', self.name, len(self.est_ejm), self.mse_ejm)
+        #rospy.loginfo('%s: data fitting spd: degree: %d, mse: %.3f', self.name, len(self.est_spd), self.mse_spd)
 
 
     def publish_estimations(self, event=None):

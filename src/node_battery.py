@@ -42,24 +42,27 @@ class BatteryNode(object):
         self.n_series = int(kwargs.get('n_series', 7))
         self.n_parallel = float(kwargs.get('n_parallel', 4))
 
-        self.emax = float(kwargs.get('emax', 172800.0))
-        self.vmax = float(kwargs.get('vmax', 4.2))
-        self.vmin = float(kwargs.get('vmin', 3.1))
-        self.cbe = float(kwargs.get('cbe', 43038.0))
+        self.emax = float(kwargs.get('emax', 1174824.0))
+        self.vmax = float(kwargs.get('vmax', 29.2))
+        self.vmin = float(kwargs.get('vmin', 24.5))
 
         # pack
         self.energy_max = self.emax * self.n_parallel
         self.energy_residual = np.copy(self.energy_max)
+        self.energy_used = 0.0
+
         self.soc = 1.0
-        self.vbat = self.vmax * self.n_series
+        self.vbat = self.vmax
         self.amps = 0.0
 
         # parameters
-        Cb = float(kwargs.get('Cb', 43038.0))
-        Re = float(kwargs.get('Re', 7.7e-3))
-        Rt = float(kwargs.get('Rt', 15.4e-3))
+        Cb = float(kwargs.get('Cb', 9309.59))
+        Re = float(kwargs.get('Re', 105.0e-3))
+        Rt = float(kwargs.get('Rt', 98.0e-3))
         Rc = float(kwargs.get('Rc', 0.4e-3))
-        Cc = float(kwargs.get('Cc', 4.074e3))
+        Cc = float(kwargs.get('Cc', 203.69))
+
+        self.cbe = Cb
 
         # system matrices
         A = np.array([
@@ -109,7 +112,11 @@ class BatteryNode(object):
 
         self.x[:] = self.vmax
         self.energy_residual = np.copy(self.energy_max)
+        self.energy_used = 0.0
+
         self.soc = 1.0
+        self.vbat = self.vmax
+        self.amps = 0.0
 
         return []
 
@@ -125,28 +132,27 @@ class BatteryNode(object):
         self.y = np.dot(self.Cd, x) + np.dot(self.Dd, self.u)
 
         # update capacity
-        vcb = self.x[0, 0]
-        eres = 0.5 * self.cbe * ((vcb ** 2) - (self.vmin ** 2))
+        eused = 0.5 * self.cbe * ((self.vmax ** 2) - (self.x[0, 0] ** 2))
 
-        # adjust for series capacitors
-        #   takes into account the new equivalent model (the energy is higher given the increased voltage!)
-        eres = eres * self.n_series
+        # assume different packs working ideally
+        self.energy_used = eused * self.n_parallel
+        self.vbat = self.y
 
-        self.energy_residual = eres * self.n_parallel
-        self.soc = self.energy_residual / self.energy_max
-        self.vbat = self.y * self.n_series
-
-        # clipping
+        self.energy_residual = self.energy_max - self.energy_used
         self.energy_residual = np.clip(self.energy_residual, 0.0, self.energy_max)
+
+        self.soc = self.energy_residual / self.energy_max
         self.soc = np.clip(self.soc, 0.0, 1.0)
 
-        #rospy.loginfo('%s: state: %s, output: %s', self.name, self.x, self.y)
+        # rospy.loginfo('%s: state: %s, output: %s', self.name, self.x, self.y)
+        # rospy.loginfo('%s: eint: %.3f J, eused: %.3f', self.name, self.eint, self.energy_used)
 
     def publish_state(self, event=None):
         # ros messages
         res = BatteryStatus()
         res.header.stamp = rospy.Time.now()
         res.energy_max = self.energy_max
+        res.energy_used = self.energy_used
         res.energy_residual = self.energy_residual
         res.soc = self.soc
         res.voltage = self.vbat

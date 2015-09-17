@@ -4,6 +4,7 @@
 Header header
 
 float64 energy_max              # battery system maximum energy
+float64 energy_used             # battery system used energy
 float64 energy_residual         # battery system residual energy
 float64 soc                     # state of charge
 

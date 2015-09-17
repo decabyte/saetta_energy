@@ -17,24 +17,14 @@ saetta:
     n_parallel: 4
     n_series: 7
 
-    vmax: 4.2
-    vmin: 3.1
+    vmax: 29.2
+    vmin: 24.5
 
-    emax: 172800.0
-    cbe: 43038.0
+    emax: 1174824.0
+    cbe: 9309.59
 
-    Cb: 43.038e3          # 86.08e3  (twice the Cbe derived from emax)
-    Re: 7.7e-3
-    Rt: 15.4e-3
+    Cb: 9309.59
+    Re: 105.0e-3
+    Rt: 98.0e-3
     Rc: 0.4e-3
-    Cc: 4.074e3
-
-    # nessie viii
-    # emax = 2.9 * 3.7 * 3600
-    # Cb = (2 * emax) / ((4.2**2) - (3.1**2))
-    #
-    # Cb = Cb * 2.0
-    # Re = 1.1e-3 * 7.0  # 1.1e-3
-    # Rt = 2.2e-3 * 7.0  # 2.2e-3
-    # Rc = 0.4e-3
-    # Cc = 4.074e3
+    Cc: 203.69
