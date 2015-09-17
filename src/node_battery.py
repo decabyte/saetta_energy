@@ -55,7 +55,7 @@ class BatteryNode(object):
         self.amps = 0.0
 
         # parameters
-        Cb = float(kwargs.get('Cb', 86.08e3))
+        Cb = float(kwargs.get('Cb', 43038.0))
         Re = float(kwargs.get('Re', 7.7e-3))
         Rt = float(kwargs.get('Rt', 15.4e-3))
         Rc = float(kwargs.get('Rc', 0.4e-3))
@@ -127,6 +127,10 @@ class BatteryNode(object):
         # update capacity
         vcb = self.x[0, 0]
         eres = 0.5 * self.cbe * ((vcb ** 2) - (self.vmin ** 2))
+
+        # adjust for series capacitors
+        #   takes into account the new equivalent model (the energy is higher given the increased voltage!)
+        eres = eres * self.n_series
 
         self.energy_residual = eres * self.n_parallel
         self.soc = self.energy_residual / self.energy_max

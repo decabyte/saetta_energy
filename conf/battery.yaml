@@ -23,7 +23,7 @@ saetta:
     emax: 172800.0
     cbe: 43038.0
 
-    Cb: 86.08e3
+    Cb: 43.038e3          # 86.08e3  (twice the Cbe derived from emax)
     Re: 7.7e-3
     Rt: 15.4e-3
     Rc: 0.4e-3

@@ -35,7 +35,8 @@
 	
 	<!-- start the thruster diagnostic node and energy monitor -->
     <include file="$(find saetta_energy)/launch/thruster_monitor.launch"/>
-    <include file="$(find saetta_energy)/launch/energy_monitor.launch"/>
+
+    <!--<include file="$(find saetta_energy)/launch/energy_monitor.launch"/>-->
 
     <!-- rviz -->
     <group if="$(arg use_gui)">
