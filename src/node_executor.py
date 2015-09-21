@@ -207,8 +207,8 @@ class MissionExecutor(object):
         # increment action counter
         self.action_id += 1
 
-        if self.action_current['name'] != 'hover':
-            return
+        # if self.action_current['name'] != 'hover':
+        #     return
 
         # mark inspection point as visited
         try:
@@ -301,35 +301,6 @@ class MissionExecutor(object):
 
         # update action status
         self.action_state = data.status
-
-
-    def _init_log(self, label):
-        output_file = '{}_{}.csv'.format(label, id_generator(6))
-        self.output_log = os.path.join(self.output_dir, output_file)
-
-        # init output log
-        if not os.path.exists(self.output_log):
-            rospy.loginfo('%s: saving mission output to file (%s)', self.name, self.output_log)
-
-            with open(self.output_log, 'wt') as mlog:
-                mlog.write('id,action,label,time_start,time_end,time_elapsed,energy_used,direction,distance\n')
-
-    def _write_log(self, label, action):
-        extra = '0.0,0.0'
-
-        if action['name'] == ACT_GOTO:
-            extra ='{},{}'.format(self.last_los_orient, self.last_los_dist)
-
-        # generate mission log
-        out = '{},{},{},{},{},{},{},{}\n'.format(
-            self.action_id, action['name'], label, self.time_start, self.time_end,
-            self.time_elapsed, self.energy_used, extra
-        )
-
-        # save mission log
-        with open(self.output_log, 'at') as mlog:
-            mlog.write(out)
-            mlog.flush()
 
 
     def execute_mission(self, config, **kwargs):
@@ -485,24 +456,6 @@ class MissionExecutor(object):
             }
         })
 
-        # # generate long inspection task
-        # wps = [self.ips_dict[wp].tolist() for wp in self.route]
-        #
-        # self.actions.append({
-        #     'name': 'goto',
-        #     'params': {
-        #         'pose': wps
-        #     }
-        # })
-        #
-        # self.actions.append({
-        #     'name': 'hover',
-        #     'params': {
-        #         'pose': [wps[-1]]
-        #     },
-        #     'ips': self.route[-1]
-        # })
-
         # second execute the route (skips the initial piece (going to AUV position)
         for n in xrange(len(self.route)):
             next_pose = np.copy(self.ips_dict[self.route[n]])
@@ -514,18 +467,19 @@ class MissionExecutor(object):
                 },
                 'cost': cost_hops[n],
                 'duration': time_hops[n],
-            })
-
-            if n < len(self.route) - 1:
-                next_pose[5] = tt.calculate_orientation(self.ips_dict[self.route[n]], self.ips_dict[self.route[n + 1]])
-
-            self.actions.append({
-                'name': 'hover',
-                'params': {
-                    'pose': [next_pose.tolist()]
-                },
                 'ips': self.route[n]
             })
+
+            # if n < len(self.route) - 1:
+            #     next_pose[5] = tt.calculate_orientation(self.ips_dict[self.route[n]], self.ips_dict[self.route[n + 1]])
+            #
+            # self.actions.append({
+            #     'name': 'hover',
+            #     'params': {
+            #         'pose': [next_pose.tolist()]
+            #     },
+            #     'ips': self.route[n]
+            # })
 
         rospy.loginfo('%s: generated action sequence (n=%d)', self.name, len(self.actions))
 
@@ -549,6 +503,35 @@ class MissionExecutor(object):
 
         # increase plan counter (to keep track of future replans)
         self.plan_id += 1
+
+
+    def _init_log(self, label):
+        output_file = '{}_{}.csv'.format(label, id_generator(6))
+        self.output_log = os.path.join(self.output_dir, output_file)
+
+        # init output log
+        if not os.path.exists(self.output_log):
+            rospy.loginfo('%s: saving mission output to file (%s)', self.name, self.output_log)
+
+            with open(self.output_log, 'wt') as mlog:
+                mlog.write('id,action,label,time_start,time_end,time_elapsed,energy_used,direction,distance\n')
+
+    def _write_log(self, label, action):
+        extra = '0.0,0.0'
+
+        if action['name'] == ACT_GOTO:
+            extra ='{},{}'.format(self.last_los_orient, self.last_los_dist)
+
+        # generate mission log
+        out = '{},{},{},{},{},{},{},{}\n'.format(
+            self.action_id, action['name'], label, self.time_start, self.time_end,
+            self.time_elapsed, self.energy_used, extra
+        )
+
+        # save mission log
+        with open(self.output_log, 'at') as mlog:
+            mlog.write(out)
+            mlog.flush()
 
 
 def parse_arguments(args=None):

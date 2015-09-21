@@ -49,8 +49,9 @@ S_RUNNING = 1
 THR_VNOM = 28.0         # volt
 THR_FRAME = 0.1         # secs
 TS_UPDATE = 5           # secs
-ACTION_GOTO = 'goto'
 
+POLY_DEGS = (3, 5, 7)
+ACTION_GOTO = 'goto'
 
 import scipy as sci
 import scipy.optimize
@@ -99,8 +100,11 @@ class PathMonitor(object):
         self.initial_ejm = float(kwargs.get('initial_ejm', 70.0))
         self.initial_spd = float(kwargs.get('initial_spd', 0.5))
 
-        self.est_ejm = [0, self.initial_ejm]
-        self.est_spd = [0, self.initial_spd]
+        self.est_ejm = np.zeros(max(POLY_DEGS))
+        self.est_spd = np.zeros(max(POLY_DEGS))
+        self.est_ejm[-1] = self.initial_ejm
+        self.est_spd[-1] = self.initial_spd
+
         self.mse_ejm = np.inf
         self.mse_spd = np.inf
 
@@ -333,7 +337,7 @@ class PathMonitor(object):
         prev_s = np.inf
 
         # yaw vs ejm
-        for n in (3, 5, 7):
+        for n in POLY_DEGS:
             popt_e, pcov_e = sci.optimize.curve_fit(poly, valid[:, 2], ejm, p0=np.ones(n))
             emse_e = mse(ejm, poly(valid[:, 2], *popt_e))
 

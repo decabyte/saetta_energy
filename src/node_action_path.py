@@ -148,7 +148,7 @@ class GotoPathServer(PathActionServer):
         #     est_time = est_dist / (0.5 * target_speed)
         #     path_timeout = max(timeout, est_time)
 
-        rospy.loginfo('%s: requesting goto path with final pose:\n%s', self.__class__.__name__, np.array(pose[-1]))
+        rospy.loginfo('%s: requesting goto path (%s) with final pose:\n%s', self.__class__.__name__, mode, np.array(pose[-1]))
         self._send_path_request(pose, mode=mode, timeout=timeout, target_speed=target_speed)
 
         self.feedback = ActionFeedback.ACTION_RUNNING
