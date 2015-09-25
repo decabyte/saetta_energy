@@ -50,7 +50,6 @@ DEFAULT_RATE = 2    # Hz
 # actions
 ACT_GOTO = 'goto'
 ACT_HOVER = 'hover'
-ACT_CURR = 'estimate_currents'
 
 
 class MissionExecutor(object):
@@ -73,8 +72,8 @@ class MissionExecutor(object):
         # estimation config
         self.ejm_coeff = [0, self.initial_ejm]          # linear
         self.spd_coeff = [0, self.initial_spd]          # linear
-        self.ejm_rmse = self.initial_ejm / 4.0          # initial rmse
-        self.spd_rmse = self.initial_spd / 4.0          # initial rmse
+        self.ejm_rmse = self.initial_ejm / 10.0         # initial rmse
+        self.spd_rmse = self.initial_spd / 10.0         # initial rmse
         self.cost_offset = 0.5                          # small epsilon for adjusting the tsp problem
 
         # mission state machine
@@ -183,11 +182,11 @@ class MissionExecutor(object):
 
     def state_run(self):
         if self.action_state in (ActionFeedback.ACTION_FAILED, ActionFeedback.ACTION_REJECT, ActionFeedback.ACTION_TIMEOUT):
-            rospy.loginfo('%s: action %d failed, aborting mission ...', self.name, self.action_id)
+            rospy.loginfo('%s: feedback action[%d]: failed', self.name, self.action_id)
             self.mission_state = MISSION_ABORT
 
         elif self.action_state == ActionFeedback.ACTION_SUCCESS:
-            rospy.loginfo('%s: action %d completed, continuing mission ...', self.name, self.action_id)
+            rospy.loginfo('%s: feedback action[%d]: success', self.name, self.action_id)
 
             self._success_callback()
             self.mission_state = MISSION_IDLE
@@ -199,7 +198,7 @@ class MissionExecutor(object):
         rospy.signal_shutdown('mission aborted')
 
     def state_completed(self):
-        rospy.loginfo('%s: mission completed with success', self.name)
+        rospy.loginfo('%s: mission completed', self.name)
         rospy.signal_shutdown('mission completed')
 
 
@@ -213,18 +212,18 @@ class MissionExecutor(object):
         # mark inspection point as visited
         try:
             self.ips_state[self.action_current['ips']] = 1
-            self.hop_counter += 1
+            self.leg_cnt += 1
         except KeyError:
             return
 
         # evaluate residuals
-        hops_costs, hops_times = self._analyse_route(self.route[self.hop_counter:])
+        next_costs, prev_costs = self._analyse_route(self.route[self.leg_cnt:])
 
-        prev_costs = self.plan_cost_hops[self.hop_counter:]
-        prev_times = self.plan_time_hops[self.hop_counter:]
+        prev_costs = self.cost_legs[self.leg_cnt:]
+        prev_times = self.time_legs[self.leg_cnt:]
 
-        rospy.loginfo('%s: energy residual updates: prev: %.2f J -- new: %.2f J', self.name, sum(prev_costs), sum(hops_costs))
-        rospy.loginfo('%s: time residual updates: prev: %.2f s -- new: %.2f s', self.name, sum(prev_times), sum(hops_times))
+        rospy.loginfo('%s: residual energy: prev: %.2f J -- new: %.2f J', self.name, sum(prev_costs), sum(next_costs))
+        rospy.loginfo('%s: residual time: prev: %.2f s -- new: %.2f s', self.name, sum(prev_times), sum(prev_costs))
 
         # # (ip achieved) calculate remaining inspection points
         # ips_togo = [ip for ip, s in self.ips_state.iteritems() if s == 0]
@@ -239,10 +238,6 @@ class MissionExecutor(object):
 
 
     def dispatch_action(self, action):
-        # action stats
-        self.time_start = time.time()
-        self.energy_start = self.energy_last
-
         params = dict(**action['params'])
         mode = params.pop('mode', 'fast')
         pose = params.pop('pose')   # array N-by-6
@@ -273,9 +268,12 @@ class MissionExecutor(object):
         ad.params.append(KeyValue('mode', str(mode)))
         ad.params.extend([KeyValue(k, str(v)) for k, v in params])
 
-        rospy.loginfo('%s: dispatching action[%d]: %s', self.name, self.action_id, action['name'])
+        rospy.loginfo('%s: dispatch action[%d]: %s', self.name, self.action_id, action['name'])
         self.pub_disp.publish(ad)
 
+        # action stats
+        self.time_start = time.time()
+        self.energy_start = self.energy_last
 
     def handle_feedback(self, data):
         if self.action_last is None:
@@ -292,8 +290,7 @@ class MissionExecutor(object):
 
         if data.status == ActionFeedback.ACTION_SUCCESS and self.action_state != ActionFeedback.ACTION_SUCCESS:
             # update action stats
-            self.time_end = time.time()
-            self.time_elapsed = self.time_end - self.time_start
+            self.time_elapsed = data.duration
             self.energy_used = self.energy_last - self.energy_start
 
             # record action stats
@@ -349,40 +346,68 @@ class MissionExecutor(object):
         self._plan(ips_labels)
 
 
-    def _calculate_cost_hop(self, wp_a, wp_b):
+    def _calculate_cost_leg(self, wp_a, wp_b):
         dist = tt.distance_between(wp_a, wp_b, spacing_dim=3)
-
         yaw_los = tt.calculate_orientation(wp_a, wp_b)
-        cost = np.polyval(self.ejm_coeff, yaw_los) * dist + self.cost_offset
 
+        k_ejm = np.polyval(self.ejm_coeff, yaw_los)
+        cost = k_ejm * dist + self.cost_offset
+        cost = np.maximum(cost, 0.0)
+
+        # 95% prediction interval
+        cost_u = (k_ejm + 1.95 * self.ejm_rmse) * dist + self.cost_offset
+        cost_l = (k_ejm - 1.95 * self.ejm_rmse) * dist + self.cost_offset
+
+        # avoid out of range values during initial training
         if cost <= 0:
             cost = self.initial_ejm * dist + self.cost_offset
+            cost_u = cost
+            cost_l = cost
 
-        return cost
+        return cost, (cost_l, cost_u)
 
-    def _calculate_time_hop(self, wp_a, wp_b):
+    def _calculate_time_leg(self, wp_a, wp_b):
         dist = tt.distance_between(wp_a, wp_b, spacing_dim=3)
-
         yaw_los = tt.calculate_orientation(wp_a, wp_b)
+
         vc = np.polyval(self.spd_coeff, yaw_los)
+        ltime = (0.5 * (vc / self.est_acc)) + (dist / vc) + (0.5 * (vc / self.est_dec))
+        ltime = np.maximum(ltime, 10.0)
 
-        time = (0.5 * (vc / self.est_acc)) + (dist / vc) + (0.5 * (vc / self.est_dec))
-        time = np.maximum(time, 10.0)
+        # 95% prediction intervals
+        vc_u = vc + 1.95 * self.spd_rmse
+        vc_l = vc - 1.95 * self.spd_rmse
 
-        return time
+        ltime_u = (0.5 * (vc_u / self.est_acc)) + (dist / vc_u) + (0.5 * (vc_u / self.est_dec))
+        ltime_u = np.maximum(ltime_u, 10.0)
 
-    def _analyse_route(self, route):
-        cost_hops = []
-        time_hops = []
+        ltime_l = (0.5 * (vc_l / self.est_acc)) + (dist / vc_l) + (0.5 * (vc_l / self.est_dec))
+        ltime_l = np.maximum(ltime_l, 10.0)
+
+        return ltime, (ltime_l, ltime_u)
+
+    def _analyse_route(self, route, kind=None):
+        cost_legs = []
+        time_legs = []
 
         for n in xrange(len(route)):
             wp_a = self.ips_dict[route[n - 1]]
             wp_b = self.ips_dict[route[n]]
 
-            cost_hops.append(self._calculate_cost_hop(wp_a, wp_b))
-            time_hops.append(self._calculate_time_hop(wp_a, wp_b))
+            lcost, (cd, cu) = self._calculate_cost_leg(wp_a, wp_b)
+            ltime, (td, tu) = self._calculate_time_leg(wp_a, wp_b)
 
-        return cost_hops, time_hops
+            if kind == 'upper':
+                cost_legs.append(cd)
+                time_legs.append(td)
+            elif kind == 'lower':
+                cost_legs.append(cu)
+                time_legs.append(tu)
+            else:
+                cost_legs.append(lcost)
+                time_legs.append(ltime)
+
+        return cost_legs, time_legs
 
 
     def _plan_tsp(self, labels):
@@ -405,7 +430,7 @@ class MissionExecutor(object):
                 if i == j:
                     continue
 
-                ips_costs[i][j] = self._calculate_cost_hop(self.ips_dict[ips_labels[i]], self.ips_dict[ips_labels[j]])
+                ips_costs[i][j], _ = self._calculate_cost_leg(self.ips_dict[ips_labels[i]], self.ips_dict[ips_labels[j]])
 
         try:
             # ask solver for optimal route
@@ -433,14 +458,18 @@ class MissionExecutor(object):
     def _plan(self, labels):
         # plan route
         self.route, _, _ = self._plan_tsp(labels)
-        cost_hops, time_hops = self._analyse_route(self.route)
-
         rospy.loginfo('%s: found inspection route:\n%s', self.name, self.route)
 
-        # route monitor
-        self.hop_counter = 0
-        self.plan_cost_hops = cost_hops
-        self.plan_time_hops = time_hops
+        # route analysis
+        self.leg_cnt = 0
+        self.cost_legs, self.time_legs = self._analyse_route(self.route)
+
+        # boundary analysis
+        cost_upper, time_upper = self._analyse_route(self.route, kind='upper')
+        cost_lower, time_lower = self._analyse_route(self.route, kind='lower')
+
+        cost_bound = zip(cost_lower, cost_upper)
+        time_bound = zip(time_lower, time_upper)
 
         # generate action sequence
         self.actions = []
@@ -458,15 +487,15 @@ class MissionExecutor(object):
 
         # second execute the route (skips the initial piece (going to AUV position)
         for n in xrange(len(self.route)):
-            next_pose = np.copy(self.ips_dict[self.route[n]])
+            #next_pose = np.copy(self.ips_dict[self.route[n]])
 
             self.actions.append({
                 'name': 'goto',
                 'params': {
                     'pose': [self.ips_dict[self.route[n]].tolist()]
                 },
-                'cost': cost_hops[n],
-                'duration': time_hops[n],
+                'cost': self.cost_legs[n],
+                'duration': self.time_legs[n],
                 'ips': self.route[n]
             })
 
@@ -491,10 +520,12 @@ class MissionExecutor(object):
             'time': time.time(),
             'ips_count': len(labels),
             'route': self.route,
-            'cost_hops': cost_hops,
-            'cost_total': sum(cost_hops),
-            'time_hops': time_hops,
-            'time_tot': sum(time_hops),
+            'cost_legs': self.cost_legs,
+            'cost_total': sum(self.cost_legs),
+            'cost_bound': cost_bound,
+            'time_legs': self.time_legs,
+            'time_total': sum(self.time_legs),
+            'time_bound': time_bound,
             'actions': self.actions,
         }
 
