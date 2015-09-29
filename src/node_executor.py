@@ -94,8 +94,8 @@ class MissionExecutor(object):
         }
 
         # action state machine
-        self.action_cnt = 0
-        self.action_id = 0
+        self.dispatch_id = 0
+        self.action_idx = 0
         self.action_last = None
         self.action_state = ActionFeedback.ACTION_IDLE
         self.action_current = {}
@@ -106,7 +106,7 @@ class MissionExecutor(object):
         # output
         self.output_dir = kwargs.get('output_dir', os.path.expanduser('~'))
         self.output_label = kwargs.get('output_label', 'current')
-        self.output_log = os.path.join(self.output_dir, '{}_{}.csv'.format(self.output_label, id_generator(6)))
+        #self.output_log = os.path.join(self.output_dir, '{}_{}.csv'.format(self.output_label, id_generator(6)))
 
         # action stats
         self.time_start = 0.0
@@ -167,13 +167,13 @@ class MissionExecutor(object):
         if len(self.actions) < 1:
             return
 
-        if self.action_id >= len(self.actions):
+        if self.action_idx >= len(self.actions):
             rospy.loginfo('%s: no more action to execute ...', self.name)
             self.mission_state = MISSION_COMPLETED
             return
 
         # select action
-        self.action_current = self.actions[self.action_id]
+        self.action_current = self.actions[self.action_idx]
         self.action_state = ActionFeedback.ACTION_IDLE
 
         # start action and resume mission
@@ -182,11 +182,11 @@ class MissionExecutor(object):
 
     def state_run(self):
         if self.action_state in (ActionFeedback.ACTION_FAILED, ActionFeedback.ACTION_REJECT, ActionFeedback.ACTION_TIMEOUT):
-            rospy.loginfo('%s: feedback action[%d]: failed', self.name, self.action_id)
+            rospy.loginfo('%s: feedback action[%d]: failed', self.name, self.action_idx)
             self.mission_state = MISSION_ABORT
 
         elif self.action_state == ActionFeedback.ACTION_SUCCESS:
-            rospy.loginfo('%s: feedback action[%d]: success', self.name, self.action_id)
+            rospy.loginfo('%s: feedback action[%d]: success', self.name, self.action_idx)
 
             self._success_callback()
             self.mission_state = MISSION_IDLE
@@ -204,7 +204,7 @@ class MissionExecutor(object):
 
     def _success_callback(self):
         # increment action counter
-        self.action_id += 1
+        self.action_idx += 1
 
         # if self.action_current['name'] != 'hover':
         #     return
@@ -253,13 +253,13 @@ class MissionExecutor(object):
             return
 
         # increment action counter
-        self.action_cnt += 1
+        self.dispatch_id += 1
         self.action_last = action
 
         # send action dispatch
         ad = ActionDispatch()
         ad.header.stamp = rospy.Time.now()
-        ad.id = self.action_cnt
+        ad.id = self.dispatch_id
         ad.name = action['name']
         ad.command = ActionDispatch.ACTION_START
         ad.feedback = ActionDispatch.FEED_STREAM
@@ -268,7 +268,7 @@ class MissionExecutor(object):
         ad.params.append(KeyValue('mode', str(mode)))
         ad.params.extend([KeyValue(k, str(v)) for k, v in params])
 
-        rospy.loginfo('%s: dispatch action[%d]: %s', self.name, self.action_id, action['name'])
+        rospy.loginfo('%s: dispatch action[%d]: %s', self.name, self.action_idx, action['name'])
         self.pub_disp.publish(ad)
 
         # action stats
@@ -282,7 +282,7 @@ class MissionExecutor(object):
         if data.name != self.action_last['name']:
             return
 
-        if data.id != self.action_cnt:
+        if data.id != self.dispatch_id:
             return
 
         if data.status in (ActionFeedback.ACTION_RUNNING, ActionFeedback.ACTION_IDLE):
@@ -294,7 +294,7 @@ class MissionExecutor(object):
             self.energy_used = self.energy_last - self.energy_start
 
             # record action stats
-            self._write_log(self.output_label, self.action_last)
+            #self._write_log(self.output_label, self.action_last)
 
         # update action status
         self.action_state = data.status
@@ -314,6 +314,7 @@ class MissionExecutor(object):
         else:
             inspection_points = np.array(inspection_points)
             inspection_points = np.atleast_2d(inspection_points)
+            rospy.loginfo('%s: received %d inspection points ...', self.name, inspection_points.shape[0])
 
         # store config
         self.config = config
@@ -322,13 +323,14 @@ class MissionExecutor(object):
         if self.route_optimization:
             rospy.loginfo('%s: route optimization active (mission will be replanned at runtime)')
 
-        if config.get('output_label', None) is not None:
-            self.output_label = config['output_label']
-            self.output_log = os.path.join(self.output_dir, '{}_{}.csv'.format(self.output_label, id_generator(6)))
+        # if config.get('output_label', None) is not None:
+        #     self.output_label = config['output_label']
+        #     self.output_log = os.path.join(self.output_dir, '{}_{}.csv'.format(self.output_label, id_generator(6)))
+        #
+        # self._init_log(self.output_label)
 
         # init mission
         self.mission_state = MISSION_IDLE
-        self._init_log(self.output_label)
 
         # insert inspection points
         self.ips_dict = {'IP_%d' % n: inspection_points[n, :] for n in xrange(inspection_points.shape[0])}
@@ -398,11 +400,11 @@ class MissionExecutor(object):
             ltime, (td, tu) = self._calculate_time_leg(wp_a, wp_b)
 
             if kind == 'upper':
-                cost_legs.append(cd)
-                time_legs.append(td)
-            elif kind == 'lower':
                 cost_legs.append(cu)
                 time_legs.append(tu)
+            elif kind == 'lower':
+                cost_legs.append(cd)
+                time_legs.append(td)
             else:
                 cost_legs.append(lcost)
                 time_legs.append(ltime)
@@ -472,6 +474,7 @@ class MissionExecutor(object):
         time_bound = zip(time_lower, time_upper)
 
         # generate action sequence
+        self.action_idx = 0
         self.actions = []
 
         # first hover on spot (with los for first IP)
@@ -536,33 +539,33 @@ class MissionExecutor(object):
         self.plan_id += 1
 
 
-    def _init_log(self, label):
-        output_file = '{}_{}.csv'.format(label, id_generator(6))
-        self.output_log = os.path.join(self.output_dir, output_file)
-
-        # init output log
-        if not os.path.exists(self.output_log):
-            rospy.loginfo('%s: saving mission output to file (%s)', self.name, self.output_log)
-
-            with open(self.output_log, 'wt') as mlog:
-                mlog.write('id,action,label,time_start,time_end,time_elapsed,energy_used,direction,distance\n')
-
-    def _write_log(self, label, action):
-        extra = '0.0,0.0'
-
-        if action['name'] == ACT_GOTO:
-            extra ='{},{}'.format(self.last_los_orient, self.last_los_dist)
-
-        # generate mission log
-        out = '{},{},{},{},{},{},{},{}\n'.format(
-            self.action_id, action['name'], label, self.time_start, self.time_end,
-            self.time_elapsed, self.energy_used, extra
-        )
-
-        # save mission log
-        with open(self.output_log, 'at') as mlog:
-            mlog.write(out)
-            mlog.flush()
+    # def _init_log(self, label):
+    #     output_file = '{}_{}.csv'.format(label, id_generator(6))
+    #     self.output_log = os.path.join(self.output_dir, output_file)
+    #
+    #     # init output log
+    #     if not os.path.exists(self.output_log):
+    #         rospy.loginfo('%s: saving mission output to file (%s)', self.name, self.output_log)
+    #
+    #         with open(self.output_log, 'wt') as mlog:
+    #             mlog.write('id,action,label,time_start,time_end,time_elapsed,energy_used,direction,distance\n')
+    #
+    # def _write_log(self, label, action):
+    #     extra = '0.0,0.0'
+    #
+    #     if action['name'] == ACT_GOTO:
+    #         extra ='{},{}'.format(self.last_los_orient, self.last_los_dist)
+    #
+    #     # generate mission log
+    #     out = '{},{},{},{},{},{},{},{}\n'.format(
+    #         self.action_id, action['name'], label, self.time_start, self.time_end,
+    #         self.time_elapsed, self.energy_used, extra
+    #     )
+    #
+    #     # save mission log
+    #     with open(self.output_log, 'at') as mlog:
+    #         mlog.write(out)
+    #         mlog.flush()
 
 
 def parse_arguments(args=None):
