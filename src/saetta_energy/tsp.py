@@ -227,12 +227,21 @@ def main():
 
     def __plot_problem(ips, tsp_route, total_cost):
         idx = [int(city.split('c_')[1]) for city in tsp_route]
+        ips_route = ips[idx, :]
 
         fig, ax = plt.subplots()
         ax.plot(ips[:, 1], ips[:, 0], 'o', label='inspection points')
 
-        for n in xrange(1, len(idx)):
-            ax.plot([ips[n-1, 1], ips[n, 1]], [ips[n-1, 0], ips[n, 0]], 'r--')
+        ax.plot(ips_route[:, 1], ips_route[:, 0], 'r-', alpha=0.3)
+
+        # for n in xrange(1, len(idx)):
+        #     ax.plot([ips[n-1, 1], ips[n, 1]], [ips[n-1, 0], ips[n, 0]], 'r-', alpha=0.3)
+
+        for k, n in enumerate(idx):
+            x, y = ips[n, 1], ips[n, 0]
+            xt, yt = x + 0.05 * np.abs(x), y + 0.05 * np.abs(y)
+
+            ax.annotate(str(k), xy=(x, y), xycoords='data', xytext=(x, y))
 
         ax.set_xlabel('East (m)')
         ax.set_ylabel('North (m)')
@@ -241,51 +250,70 @@ def main():
         return fig, ax
 
     # generate random problem
-    n = 100
+    n = 20
     ips = np.random.randint(-50, 50, (n, 2))
 
     cities = ['c_{}'.format(k) for k in xrange(n)]
     distances = np.zeros((n, n))
+    distances_return = np.zeros((n, n))
 
     for k in xrange(n):
         for p in xrange(n):
             distances[k, p] = np.linalg.norm(ips[k, :] - ips[p, :])
+            distances_return[k, p] = np.linalg.norm(ips[k, :] - ips[p, :]) + np.linalg.norm(ips[p, :] - ips[0, :])
 
-    # solve using the Naive solver
-    st = time.time()
-    tsp_route, total_cost, _ = naive_solve(cities, distances)
-    dt = time.time() - st
-
-    print('Naive Solver')
-    print('Time to Solve: %.2f secs' % dt)
-    print('Cost: %.3f' % total_cost)
-    print('TSP Route: %s\n' % tsp_route)
-
-    fig, ax = __plot_problem(ips, tsp_route, total_cost)
-    plt.show()
-
-    # solve using the Gurobi solver
-    st = time.time()
-    tsp_route, total_cost, model = gurobi_solve(cities, distances, output_flag=0)
-    dt = time.time() - st
-
-    print('Gurobi Solver')
-    print('Time to Solve: %.2f secs' % dt)
-    print('Cost: %.3f' % total_cost)
-    print('TSP Route: %s\n' % tsp_route)
-
-    fig, ax = __plot_problem(ips, tsp_route, total_cost)
-    plt.show()
-
-    # # solve using the PuLP solver
+    # # solve using the Naive solver
     # st = time.time()
-    # tsp_route, total_cost, prob = pulp_solve(cities, distances)
+    # tsp_route, total_cost, _ = naive_solve(cities, distances)
     # dt = time.time() - st
     #
-    # print('Problem Status: %s' % pulp.LpStatus[prob.status])
+    # print('Naive Solver')
     # print('Time to Solve: %.2f secs' % dt)
     # print('Cost: %.3f' % total_cost)
     # print('TSP Route: %s\n' % tsp_route)
+    #
+    # fig, ax = __plot_problem(ips, tsp_route, total_cost)
+    # plt.show()
+
+    if HAS_PULP:
+        # solve using the PuLP solver
+        st = time.time()
+        tsp_route, total_cost, prob = pulp_solve(cities, distances)
+        dt = time.time() - st
+
+        print('Problem Status: %s' % pulp.LpStatus[prob.status])
+        print('Time to Solve: %.2f secs' % dt)
+        print('Cost: %.3f' % total_cost)
+        print('TSP Route: %s\n' % tsp_route)
+
+        fig, ax = __plot_problem(ips, tsp_route, total_cost)
+
+        # solve using the PuLP solver
+        st = time.time()
+        tsp_route, total_cost, prob = pulp_solve(cities, distances_return)
+        dt = time.time() - st
+
+        print('Problem Status: %s' % pulp.LpStatus[prob.status])
+        print('Time to Solve: %.2f secs' % dt)
+        print('Cost: %.3f' % total_cost)
+        print('TSP Route: %s\n' % tsp_route)
+
+        fig, ax = __plot_problem(ips, tsp_route, total_cost)
+        plt.show()
+
+    if HAS_GUROBI:
+        # solve using the Gurobi solver
+        st = time.time()
+        tsp_route, total_cost, model = gurobi_solve(cities, distances, output_flag=0)
+        dt = time.time() - st
+
+        print('Gurobi Solver')
+        print('Time to Solve: %.2f secs' % dt)
+        print('Cost: %.3f' % total_cost)
+        print('TSP Route: %s\n' % tsp_route)
+
+        fig, ax = __plot_problem(ips, tsp_route, total_cost)
+        plt.show()
 
 if __name__ == '__main__':
     main()

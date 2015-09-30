@@ -9,6 +9,10 @@ import collections
 import numpy as np
 np.set_printoptions(precision=3, suppress=True)
 
+import scipy as sci
+import scipy.optimize
+import statsmodels.api as sm
+
 # ros imports
 import rospy
 import roslib
@@ -52,16 +56,6 @@ TS_UPDATE = 5           # secs
 
 POLY_DEGS = (3, 5, 7)
 ACTION_GOTO = 'goto'
-
-import scipy as sci
-import scipy.optimize
-
-import sklearn as sk
-import sklearn.metrics
-
-# curve_fit support function
-def poly(x, *args):
-    return np.polyval(args, x)
 
 
 class CustomEncoder(json.JSONEncoder):
@@ -161,6 +155,19 @@ class PathMonitor(object):
         # map
         self.samples = np.zeros((self.map_length, self.map_features))
         self.map_idx = 0
+
+        # # initial estimations
+        # k = np.floor(360.0 / 24.0) + 1        # even number allows linspace to have 0.0 sampling point
+        # self.map_idx += k
+        #
+        # self.samples[0:k, 0] = rospy.Time.now().to_sec()
+        # self.samples[0:k, 1] = self.initial_ejm
+        # self.samples[0:k, 2] = np.linspace(-np.pi, np.pi, k)
+        # self.samples[0:k, 3] = 1.0e-6
+        # self.samples[0:k, 4] = self.initial_spd
+        # self.samples[0:k, 5] = 1.0e-6
+        # self.samples[0:k, 6] = 1.0
+
 
     def handle_dump(self, data):
         user_path = data.request
@@ -331,38 +338,60 @@ class PathMonitor(object):
         # compute metric (energy / distance)
         ejm = valid[:, 1] / valid[:, 6]
 
-        # fit quality estimator
-        mse = sklearn.metrics.mean_squared_error
-        prev_e = np.inf
-        prev_s = np.inf
+        self.mse_ejm = np.inf
+        self.mse_spd = np.inf
 
         # yaw vs ejm
         for n in POLY_DEGS:
-            popt_e, pcov_e = sci.optimize.curve_fit(poly, valid[:, 2], ejm, p0=np.ones(n))
-            emse_e = mse(ejm, poly(valid[:, 2], *popt_e))
+            popt, mse = self._robustfit(valid[:, 2], ejm, n)
 
-            if emse_e >= prev_e:
+            if mse >= self.mse_ejm:
                 break
 
-            prev_e = emse_e
-            self.est_ejm = np.copy(popt_e)
-            self.mse_ejm = emse_e
+            self.est_ejm = np.copy(popt)
+            self.mse_ejm = mse
 
         # yaw vs spd
-        for n in (3, 5, 7):
-            popt_s, pcov_s = sci.optimize.curve_fit(poly, valid[:, 2], valid[:, 4], p0=np.ones(n))
-            emse_s = mse(valid[:, 4], poly(valid[:, 2], *popt_s))
+        for n in POLY_DEGS:
+            popt, mse = self._robustfit(valid[:, 2], valid[:, 4], n)
 
-            if emse_s >= prev_s:
+            if mse >= self.mse_spd:
                 break
 
-            prev_s = emse_s
-            self.est_spd = np.copy(popt_s)
-            self.mse_spd = emse_s
+            self.est_spd = np.copy(popt)
+            self.mse_spd = mse
 
         #rospy.loginfo('%s: data fitting ejm: degree: %d, mse: %.3f', self.name, len(self.est_ejm), self.mse_ejm)
         #rospy.loginfo('%s: data fitting spd: degree: %d, mse: %.3f', self.name, len(self.est_spd), self.mse_spd)
 
+    def _robustfit(self, x, y, n_coeff):
+        # fitting variables
+        endog, exog = y, np.vander(x, n_coeff)
+
+        res = sm.RLM(endog, exog).fit()   # robust
+        #res = sm.OLS(endog, exog).fit()  # ordinary
+        #res = sm.WLS(endog, exog).fit()  # weighted
+        #res.summary()
+
+        popt = np.poly1d(res.params)
+
+        y_pred = np.polyval(popt, x)
+        mse = np.mean((y - y_pred) ** 2)
+
+        return popt, mse
+
+    def _polyfun(x, *args):
+        return np.polyval(args, x)
+
+    def _polyfit(self, x, y, n_coeff):
+        # curve fitting
+        popt, pcov = sci.optimize.curve_fit(self._polyfun, x, y, p0=np.ones(n_coeff))
+
+        # mean squared error
+        y_pred = self._polyfun(x, *popt)
+        mse = np.mean((y - y_pred) ** 2)
+
+        return popt, mse
 
     def publish_estimations(self, event=None):
         # ros messages

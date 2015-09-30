@@ -9,6 +9,14 @@ The following packages are needed to run the software inside this repo:
   - jinja2
   - numpy 1.8+
   - scipy 0.14+
+  - statsmodels 0.6+
+  - sklearn 0.16+
+  - control 0.7+
+
+### Optional
+
+  - gurobipy
+  - pulp
   
 
 ### Thrusters Diagnostics

@@ -490,28 +490,37 @@ class MissionExecutor(object):
 
         # second execute the route (skips the initial piece (going to AUV position)
         for n in xrange(len(self.route)):
-            #next_pose = np.copy(self.ips_dict[self.route[n]])
+            curr_pose = self.ips_dict[self.route[n]]
+            next_pose = np.copy(curr_pose)
 
+            if n < len(self.route) - 1:
+                next_pose[5] = tt.calculate_orientation(self.ips_dict[self.route[n]], self.ips_dict[self.route[n + 1]])
+
+            # motion action
             self.actions.append({
                 'name': 'goto',
                 'params': {
-                    'pose': [self.ips_dict[self.route[n]].tolist()]
+                    'pose': [curr_pose.tolist()]
                 },
                 'cost': self.cost_legs[n],
                 'duration': self.time_legs[n],
                 'ips': self.route[n]
             })
 
-            # if n < len(self.route) - 1:
-            #     next_pose[5] = tt.calculate_orientation(self.ips_dict[self.route[n]], self.ips_dict[self.route[n + 1]])
-            #
-            # self.actions.append({
-            #     'name': 'hover',
-            #     'params': {
-            #         'pose': [next_pose.tolist()]
-            #     },
-            #     'ips': self.route[n]
-            # })
+            # inspection actions
+            self.actions.append({
+                'name': 'hover',
+                'params': {
+                    'pose': [curr_pose.tolist()]
+                }
+            })
+
+            self.actions.append({
+                'name': 'hover',
+                'params': {
+                    'pose': [next_pose.tolist()]
+                }
+            })
 
         rospy.loginfo('%s: generated action sequence (n=%d)', self.name, len(self.actions))
 
