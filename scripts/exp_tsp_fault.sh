@@ -45,6 +45,9 @@ WATER_SPEED[3]=0.60  #0.30   (real value)
 #WATER_SPEED[4]=0.80  #0.40   (real value)
 #WATER_SPEED[5]=1.00  #0.50   (real value)
 
+# flow direction
+WD=0.0
+
 # slow varying currents (value is setting maximum boundary, average is WS / 2)
 #WATER_SPEED[0]=0.00
 #WATER_SPEED[1]=0.10
@@ -91,7 +94,7 @@ function recording_start() {
     pid=$!
 
     # wait a bit to allow the rosbag initialization
-    sleep 1
+    sleep 2
 
     return $pid
 }
@@ -134,7 +137,7 @@ do
     recording_start $TAG $WS
 
     # adjust water current (fixed)
-    rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.0, 0.0, 0.3927, 0.0001]"
+    rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.0, 0.0, $WD, 0.0001]"
 
     echo "starting ${TAG}_${index} navigation experiment"
     rosrun saetta_energy node_executor.py --output="$OUTPUT" --label="${TAG}_${WS}" $MISSION
@@ -144,7 +147,7 @@ do
     rosservice call /saetta/map/dump "$OUTPUT/map_${TAG}_${WS}.json"
 
     # disable recording
-    sleep 1
+    sleep 2
    	recording_stop
 
     # reset the vehicle state
@@ -159,7 +162,7 @@ do
     recording_start $TAG $WS
 
     # adjust water current (fixed)
-    rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.0, 0.0, 0.3927, 0.0001]"
+    rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.0, 0.0, $WD, 0.0001]"
 
     ### inject fault ###
 	rosparam set /pilot/fault_control true

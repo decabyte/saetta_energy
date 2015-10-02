@@ -45,6 +45,9 @@ WATER_SPEED[3]=0.60  #0.30   (real value)
 #WATER_SPEED[4]=0.80  #0.40   (real value)
 #WATER_SPEED[5]=1.00  #0.50   (real value)
 
+# water direction
+WD=0.0
+
 # slow varying currents (value is setting maximum boundary, average is WS / 2)
 #WATER_SPEED[0]=0.00
 #WATER_SPEED[1]=0.10
@@ -108,7 +111,7 @@ function recording_stop() {
 vehicle_reset
 
 
-## REFERENCE STANDARD RUNS ##
+## STANDARD RUNS ##
 for index in ${!WATER_SPEED[*]}
 do
     rosservice call /saetta/map/reset
@@ -118,31 +121,31 @@ do
 	WS="${WATER_SPEED[$index]}"
 	TAG="reference"
 
+    # enable recording
+    recording_start $TAG $WS
+
 	# reset configuration
 	#rosparam set /pilot/fault_control false
 	#rosparam set /pilot/optimal_allocation false
 
     # adjust water current (fixed)
-    rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.0, 0.0, 0.3927, 0.0001]"
+    #rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.0, 0.0, $WD, 0.0001]"
 
     # adjust water current (slow varying)
-    #rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.025, 0.001]"
+    rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.025, 0.001, $WD, 0.0001]"
 
     # adjust water current (high varying)
-	#rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.05, 0.01]"
+	#rostopic pub -1 /nav/sim/water vehicle_interface/FloatArrayStamped "values: [$WS, 0.050, 0.001, $WD, 0.0001]"
 
     # reset failure and fault mitigation
 	# rosrun vehicle_core fault_clear.sh
 	# rosservice call /pilot/fault_control "request: false"
 
-    # enable recording
-    recording_start $TAG $WS
-
-    echo "starting ${TAG}_${index} navigation experiment"
+    echo "starting ${TAG}_${WS} navigation experiment"
     rosrun saetta_energy node_executor.py --output="$OUTPUT" --label="${TAG}_${WS}" $MISSION
     echo "${TAG} run[$index]: exit code $?"
 
-    ### DISABLE PATH MONITOR UPDATES ###
+    # save map
     rosservice call /saetta/map/switch "request: false"
     rosservice call /saetta/map/dump "$OUTPUT/map_${TAG}_${WS}.json"
 
