@@ -23,7 +23,7 @@ from vehicle_core.path import trajectory_tools as tt
 
 from diagnostic_msgs.msg import KeyValue
 from actionbus.msg import ActionDispatch, ActionFeedback
-from saetta_energy.msg import BatteryStatus, RegressionResult
+from saetta_energy.msg import BatteryStatus, RegressionResult, TrackerStatus
 from auv_msgs.msg import NavSts
 
 TOPIC_NAV = 'nav/nav_sts'
@@ -32,6 +32,7 @@ TOPIC_PILOT_STS = 'pilot/status'
 TOPIC_BAT = 'saetta/battery'
 TOPIC_EJM = 'saetta/map/energy'
 TOPIC_SPD = 'saetta/map/speed'
+TOPIC_TRK = 'saetta/tracker'
 
 TOPIC_PATH_REQ = 'path/request'
 TOPIC_PATH_STS = 'path/status'
@@ -128,6 +129,9 @@ class MissionExecutor(object):
         self.pub_disp = rospy.Publisher(TOPIC_DISPATCH, ActionDispatch, queue_size=1)
         self.sub_feed = rospy.Subscriber(TOPIC_FEEDBACK, ActionFeedback, self.handle_feedback, queue_size=10)
 
+        # tracker
+        self.pub_trk = rospy.Publisher(TOPIC_TRK, TrackerStatus, queue_size=10)
+
         # rate
         self.r_main = rospy.Rate(DEFAULT_RATE)
 
@@ -217,13 +221,18 @@ class MissionExecutor(object):
             return
 
         # evaluate residuals
-        next_costs, prev_costs = self._analyse_route(self.route[self.leg_cnt:])
+        next_costs, next_times = self._analyse_route(self.route[self.leg_cnt:])
 
         prev_costs = self.cost_legs[self.leg_cnt:]
         prev_times = self.time_legs[self.leg_cnt:]
 
         rospy.loginfo('%s: residual energy: prev: %.2f J -- new: %.2f J', self.name, sum(prev_costs), sum(next_costs))
-        rospy.loginfo('%s: residual time: prev: %.2f s -- new: %.2f s', self.name, sum(prev_times), sum(prev_costs))
+        rospy.loginfo('%s: residual time: prev: %.2f s -- new: %.2f s', self.name, sum(prev_times), sum(next_times))
+
+        self._update_tracker(next_costs, next_times)
+        self._publish_tracker()
+
+
 
         # # (ip achieved) calculate remaining inspection points
         # ips_togo = [ip for ip, s in self.ips_state.iteritems() if s == 0]
@@ -235,6 +244,46 @@ class MissionExecutor(object):
         #
         #     self._plan(ips_togo)
         #     self.action_id = 0
+
+    def _update_tracker(self, next_costs, next_times):
+        # update tracking
+        self.projected_energy = self.energy_last + np.sum(next_costs)
+        self.projected_time = (time.time() - self.mission_start) + np.sum(next_times)
+
+        self.residual_actions = len(self.route) - self.leg_cnt
+        self.residual_energy = np.sum(next_costs)
+        self.residual_time = np.sum(next_times)
+
+        self.actions_energy = next_costs
+        self.actions_time = next_times
+
+        # assume a gaussian model (recompute the variance for energy and time)
+        #   var_e = sum_i(sigma_e) for i in 1 .. residual_actions
+        #   var_t = same as above
+        #
+        # this should allow to compute the POMC if energy threshold is provided
+
+        self.pomc = 1.0
+
+    def _publish_tracker(self):
+        ts = TrackerStatus()
+        ts.header.stamp = rospy.Time.now()
+        ts.projected_energy = self.projected_energy
+        ts.projected_time = self.projected_time
+
+        ts.planned_energy = np.sum(self.cost_legs)
+        ts.planned_time = np.sum(self.time_legs)
+
+        ts.residual_actions = self.residual_actions
+        ts.residual_energy = self.residual_energy
+        ts.residual_time = self.residual_time
+
+        ts.actions_energy = self.actions_energy
+        ts.actions_time = self.actions_time
+
+        ts.pomc = self.pomc
+
+        self.pub_trk.publish(ts)
 
 
     def dispatch_action(self, action):
@@ -329,9 +378,6 @@ class MissionExecutor(object):
         #
         # self._init_log(self.output_label)
 
-        # init mission
-        self.mission_state = MISSION_IDLE
-
         # insert inspection points
         self.ips_dict = {'IP_%d' % n: inspection_points[n, :] for n in xrange(inspection_points.shape[0])}
         self.ips_state = {'IP_%d' % n: 0 for n in xrange(inspection_points.shape[0])}
@@ -345,7 +391,11 @@ class MissionExecutor(object):
         ips_labels = sorted(ips_labels, key=lambda x: int(x.split('IP_')[1]))
 
         # initial plan
+        self.mission_start = time.time()
         self._plan(ips_labels)
+
+        # start mission
+        self.mission_state = MISSION_IDLE
 
 
     def _calculate_cost_leg(self, wp_a, wp_b):
@@ -532,12 +582,16 @@ class MissionExecutor(object):
             'time': time.time(),
             'ips_count': len(labels),
             'route': self.route,
+
             'cost_legs': self.cost_legs,
             'cost_total': sum(self.cost_legs),
-            'cost_bound': cost_bound,
+
             'time_legs': self.time_legs,
             'time_total': sum(self.time_legs),
+
+            'cost_bound': cost_bound,
             'time_bound': time_bound,
+
             'actions': self.actions,
         }
 
@@ -546,6 +600,10 @@ class MissionExecutor(object):
 
         # increase plan counter (to keep track of future replans)
         self.plan_id += 1
+
+        # update tracker
+        self._update_tracker(self.cost_legs, self.time_legs)
+        self._publish_tracker()
 
 
     # def _init_log(self, label):
