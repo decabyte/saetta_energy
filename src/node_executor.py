@@ -60,10 +60,14 @@ class MissionExecutor(object):
 
         # mission data
         self.config = None
+        self.route_optimization = False
+
         self.plan_id = 0
+
         self.ips_dict = []
         self.actions = []
-        self.route_optimization = False
+        self.route = []
+        self.distances = []
 
         self.initial_ejm = float(rospy.get_param('saetta/path/initial_ejm', 70.0))  # navigation cost (J/m)
         self.initial_spd = float(rospy.get_param('saetta/path/initial_spd', 0.75))  # cruise speed (m/s)
@@ -232,8 +236,6 @@ class MissionExecutor(object):
         self._update_tracker(next_costs, next_times)
         self._publish_tracker()
 
-
-
         # # (ip achieved) calculate remaining inspection points
         # ips_togo = [ip for ip, s in self.ips_state.iteritems() if s == 0]
         # ips_togo = sorted(ips_togo, key=lambda x: int(x.split('IP_')[1]))
@@ -260,9 +262,8 @@ class MissionExecutor(object):
         # assume a gaussian model (recompute the variance for energy and time)
         #   var_e = sum_i(sigma_e) for i in 1 .. residual_actions
         #   var_t = same as above
-        #
-        # this should allow to compute the POMC if energy threshold is provided
 
+        self.mse_energy = np.sum((self.ejm_rmse ** 2) * (self.distances[self.leg_cnt:]))
         self.pomc = 1.0
 
     def _publish_tracker(self):
@@ -278,10 +279,12 @@ class MissionExecutor(object):
         ts.residual_energy = self.residual_energy
         ts.residual_time = self.residual_time
 
+        ts.pomc = self.pomc
+        ts.rmse_energy = np.sqrt(self.mse_energy)
+        ts.rmse_time = self.spd_rmse     # warning: conversion of rmse should be added
+
         ts.actions_energy = self.actions_energy
         ts.actions_time = self.actions_time
-
-        ts.pomc = self.pomc
 
         self.pub_trk.publish(ts)
 
@@ -516,6 +519,16 @@ class MissionExecutor(object):
         self.leg_cnt = 0
         self.cost_legs, self.time_legs = self._analyse_route(self.route)
 
+        # distance
+        self.distances = np.zeros(len(self.route))
+        self.distances[0] = np.linalg.norm(self.ips_dict[self.route[0]][0:3] - self.pos[0:3])
+
+        for n in xrange(1, len(self.route)):
+            a = self.ips_dict[self.route[n - 1]]
+            b = self.ips_dict[self.route[n]]
+
+            self.distances[n] = np.linalg.norm(a[0:3] - b[0:3])
+
         # boundary analysis
         cost_upper, time_upper = self._analyse_route(self.route, kind='upper')
         cost_lower, time_lower = self._analyse_route(self.route, kind='lower')
@@ -554,6 +567,7 @@ class MissionExecutor(object):
                 },
                 'cost': self.cost_legs[n],
                 'duration': self.time_legs[n],
+                'distance': self.distances[n],
                 'ips': self.route[n]
             })
 
