@@ -8,10 +8,12 @@ import traceback
 import argparse
 import json
 import time
-import copy
 
 import numpy as np
 np.set_printoptions(precision=3, suppress=True)
+
+import scipy as sci
+import scipy.stats
 
 import rospy
 import roslib
@@ -80,6 +82,9 @@ class MissionExecutor(object):
         self.ejm_rmse = self.initial_ejm / 10.0         # initial rmse
         self.spd_rmse = self.initial_spd / 10.0         # initial rmse
         self.cost_offset = 0.5                          # small epsilon for adjusting the tsp problem
+
+        self.thresh_energy = 0.5 * (535 * 3600)     # joules (half of battery capacity)
+        self.thresh_time = 60 * 60                  # seconds (one hour mission)
 
         # mission state machine
         self.mission_state = MISSION_IDLE
@@ -262,9 +267,11 @@ class MissionExecutor(object):
         # assume a gaussian model (recompute the variance for energy and time)
         #   var_e = sum_i(sigma_e) for i in 1 .. residual_actions
         #   var_t = same as above
-
         self.mse_energy = np.sum((self.ejm_rmse ** 2) * (self.distances[self.leg_cnt:]))
-        self.pomc = 1.0
+
+        #   pomc is then calculated as the CDF given an energy threshold for the
+        #   cumulative planned energy with a variance derived from the planner computations
+        self.pomc = scipy.stats.norm.cdf(self.thresh_energy, self.projected_energy, np.sqrt(self.mse_energy))
 
     def _publish_tracker(self):
         ts = TrackerStatus()
