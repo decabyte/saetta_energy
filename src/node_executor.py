@@ -86,6 +86,9 @@ class MissionExecutor(object):
         self.thresh_energy = 0.5 * (535 * 3600)     # joules (half of battery capacity)
         self.thresh_time = 60 * 60                  # seconds (one hour mission)
 
+        self.mission_energy_start = 0.0
+        self.mission_time_start = 0.0
+
         # mission state machine
         self.mission_state = MISSION_IDLE
         self.map_state_mission = {
@@ -112,6 +115,7 @@ class MissionExecutor(object):
 
         # vehicle state
         self.pos = np.zeros(6, dtype=np.float64)
+        self.energy_used = 0.0
 
         # output
         self.output_dir = kwargs.get('output_dir', os.path.expanduser('~'))
@@ -119,11 +123,11 @@ class MissionExecutor(object):
         #self.output_log = os.path.join(self.output_dir, '{}_{}.csv'.format(self.output_label, id_generator(6)))
 
         # action stats
-        self.time_start = 0.0
-        self.time_end = 0.0
-        self.time_elapsed = 0.0
-        self.energy_last = 0.0
-        self.energy_start = 0.0
+        self.action_time_start = 0.0
+        self.action_time_end = 0.0
+        self.action_time_elapsed = 0.0
+        self.action_energy_used = 0.0
+        self.action_energy_start = 0.0
         self.last_los_orient = 0.0
         self.last_los_dist = 0.0
 
@@ -157,7 +161,7 @@ class MissionExecutor(object):
         ])
 
     def handle_battery(self, data):
-        self.energy_last = data.energy_max - data.energy_residual
+        self.energy_used = data.energy_used
 
     def handle_ejm(self, data):
         self.ejm_coeff = np.array(data.coeff)
@@ -235,11 +239,11 @@ class MissionExecutor(object):
         prev_costs = self.cost_legs[self.leg_cnt:]
         prev_times = self.time_legs[self.leg_cnt:]
 
-        rospy.loginfo('%s: residual energy: prev: %.2f J -- new: %.2f J', self.name, sum(prev_costs), sum(next_costs))
-        rospy.loginfo('%s: residual time: prev: %.2f s -- new: %.2f s', self.name, sum(prev_times), sum(next_times))
-
         self._update_tracker(next_costs, next_times)
         self._publish_tracker()
+
+        rospy.loginfo('%s: residual energy: prev: %.2f J -- new: %.2f J', self.name, sum(prev_costs), sum(next_costs))
+        rospy.loginfo('%s: residual time: prev: %.2f s -- new: %.2f s', self.name, sum(prev_times), sum(next_times))
 
         # # (ip achieved) calculate remaining inspection points
         # ips_togo = [ip for ip, s in self.ips_state.iteritems() if s == 0]
@@ -254,8 +258,8 @@ class MissionExecutor(object):
 
     def _update_tracker(self, next_costs, next_times):
         # update tracking
-        self.projected_energy = self.energy_last + np.sum(next_costs)
-        self.projected_time = (time.time() - self.mission_start) + np.sum(next_times)
+        self.projected_energy = (self.energy_used - self.mission_energy_start) + np.sum(next_costs)
+        self.projected_time = (time.time() - self.mission_time_start) + np.sum(next_times)
 
         self.residual_actions = len(self.route) - self.leg_cnt
         self.residual_energy = np.sum(next_costs)
@@ -331,8 +335,8 @@ class MissionExecutor(object):
         self.pub_disp.publish(ad)
 
         # action stats
-        self.time_start = time.time()
-        self.energy_start = self.energy_last
+        self.action_time_start = time.time()
+        self.action_energy_start = self.action_energy_used
 
     def handle_feedback(self, data):
         if self.action_last is None:
@@ -349,8 +353,8 @@ class MissionExecutor(object):
 
         if data.status == ActionFeedback.ACTION_SUCCESS and self.action_state != ActionFeedback.ACTION_SUCCESS:
             # update action stats
-            self.time_elapsed = data.duration
-            self.energy_used = self.energy_last - self.energy_start
+            self.action_time_elapsed = data.duration
+            self.action_energy_used = self.action_energy_used - self.action_energy_start
 
             # record action stats
             #self._write_log(self.output_label, self.action_last)
@@ -377,10 +381,11 @@ class MissionExecutor(object):
 
         # store config
         self.config = config
-        self.route_optimization = bool(config.get('route_optimization', False))
 
-        if self.route_optimization:
-            rospy.loginfo('%s: route optimization active (mission will be replanned at runtime)')
+        # self.route_optimization = bool(config.get('route_optimization', False))
+        #
+        # if self.route_optimization:
+        #     rospy.loginfo('%s: route optimization active (mission will be replanned at runtime)')
 
         # if config.get('output_label', None) is not None:
         #     self.output_label = config['output_label']
@@ -401,7 +406,8 @@ class MissionExecutor(object):
         ips_labels = sorted(ips_labels, key=lambda x: int(x.split('IP_')[1]))
 
         # initial plan
-        self.mission_start = time.time()
+        self.mission_time_start = time.time()
+        self.mission_energy_start = np.copy(self.energy_used)
         self._plan(ips_labels)
 
         # start mission
@@ -452,7 +458,7 @@ class MissionExecutor(object):
         cost_legs = []
         time_legs = []
 
-        for n in xrange(len(route)):
+        for n in xrange(1, len(route)):
             wp_a = self.ips_dict[route[n - 1]]
             wp_b = self.ips_dict[route[n]]
 
@@ -504,7 +510,7 @@ class MissionExecutor(object):
         # intermediate costs
         cost_hops = []
 
-        for n in xrange(len(route)):
+        for n in xrange(1, len(route)):
             i = ips_labels.index(route[n - 1])
             j = ips_labels.index(route[n])
 
@@ -523,13 +529,17 @@ class MissionExecutor(object):
         rospy.loginfo('%s: found inspection route:\n%s', self.name, self.route)
 
         # route analysis
-        self.leg_cnt = 0
-        self.cost_legs, self.time_legs = self._analyse_route(self.route)
-
-        # distance
+        self.cost_legs = np.zeros(len(self.route))
+        self.time_legs = np.zeros(len(self.route))
         self.distances = np.zeros(len(self.route))
+        self.leg_cnt = 0
+
+        self.cost_legs[1:], self.time_legs[1:] = self._analyse_route(self.route)
+
+        # update initial distance
         self.distances[0] = np.linalg.norm(self.ips_dict[self.route[0]][0:3] - self.pos[0:3])
 
+        # calculate distances
         for n in xrange(1, len(self.route)):
             a = self.ips_dict[self.route[n - 1]]
             b = self.ips_dict[self.route[n]]
@@ -542,6 +552,7 @@ class MissionExecutor(object):
 
         cost_bound = zip(cost_lower, cost_upper)
         time_bound = zip(time_lower, time_upper)
+
 
         # generate action sequence
         self.action_idx = 0
@@ -578,6 +589,10 @@ class MissionExecutor(object):
                 'ips': self.route[n]
             })
 
+            # optional config
+            if self.config.get('skip_hover', False):
+                continue
+
             # inspection actions
             self.actions.append({
                 'name': 'hover',
@@ -604,11 +619,11 @@ class MissionExecutor(object):
             'ips_count': len(labels),
             'route': self.route,
 
-            'cost_legs': self.cost_legs,
-            'cost_total': sum(self.cost_legs),
+            'cost_legs': self.cost_legs.tolist(),
+            'cost_total': np.sum(self.cost_legs),
 
-            'time_legs': self.time_legs,
-            'time_total': sum(self.time_legs),
+            'time_legs': self.time_legs.tolist(),
+            'time_total': np.sum(self.time_legs),
 
             'cost_bound': cost_bound,
             'time_bound': time_bound,
@@ -619,7 +634,7 @@ class MissionExecutor(object):
         with open(plan_file, 'wt') as plog:
             plog.write(json.dumps(plan, indent=2))
 
-        # increase plan counter (to keep track of future replans)
+        # increase plan counter (to keep track of future replan)
         self.plan_id += 1
 
         # update tracker
