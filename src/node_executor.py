@@ -597,16 +597,17 @@ class MissionExecutor(object):
             self.actions.append({
                 'name': 'hover',
                 'params': {
-                    'pose': [curr_pose.tolist()]
-                }
-            })
-
-            self.actions.append({
-                'name': 'hover',
-                'params': {
                     'pose': [next_pose.tolist()]
                 }
             })
+
+        # last action
+        self.actions.append({
+            'name': 'hover',
+            'params': {
+                'pose': [self.ips_dict[self.route[-1]].tolist()]
+            }
+        })
 
         rospy.loginfo('%s: generated action sequence (n=%d)', self.name, len(self.actions))
 
