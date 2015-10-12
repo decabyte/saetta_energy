@@ -55,6 +55,18 @@ ACT_GOTO = 'goto'
 ACT_HOVER = 'hover'
 
 
+class CustomEncoder(json.JSONEncoder):
+    """http://stackoverflow.com/questions/8230315/python-sets-are-not-json-serializable"""
+    def default(self, obj):
+        if isinstance(obj, np.ndarray):
+
+            if obj.ndim == 1:
+                return obj.tolist()
+            else:
+                return obj.flatten().tolist()
+
+        return json.JSONEncoder.default(self, obj)
+
 class MissionExecutor(object):
 
     def __init__(self, **kwargs):
@@ -477,7 +489,6 @@ class MissionExecutor(object):
 
         return cost_legs, time_legs
 
-
     def _plan_tsp(self, labels):
         if not tsp.HAS_GUROBI:
             rospy.logwarn('%s: tsp solver not available, using naive route ...', self.name)
@@ -617,23 +628,28 @@ class MissionExecutor(object):
         plan = {
             'id': self.plan_id,
             'time': time.time(),
+            'config': self.config,
+
             'ips_count': len(labels),
+
+            'ips_state': self.ips_state,
+            'ips_dict': self.ips_dict,
+
             'route': self.route,
+            'actions': self.actions,
+
+            'cost_total': np.sum(self.cost_legs),
+            'time_total': np.sum(self.time_legs),
 
             'cost_legs': self.cost_legs.tolist(),
-            'cost_total': np.sum(self.cost_legs),
-
             'time_legs': self.time_legs.tolist(),
-            'time_total': np.sum(self.time_legs),
 
             'cost_bound': cost_bound,
             'time_bound': time_bound,
-
-            'actions': self.actions,
         }
 
-        with open(plan_file, 'wt') as plog:
-            plog.write(json.dumps(plan, indent=2))
+        with open(plan_file, 'wt') as jf:
+            json.dump(plan, jf, indent=2, cls=CustomEncoder)
 
         # increase plan counter (to keep track of future replan)
         self.plan_id += 1
