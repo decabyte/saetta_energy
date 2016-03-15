@@ -38,11 +38,11 @@ fi
 declare -a WATER_SPEED
 
 # fixed currents (value is setting maximum boundary, average is WS / 2)
-#WATER_SPEED[0]=0.00  #0.00   (real value)
-#WATER_SPEED[1]=0.20  #0.10   (real value)
-#WATER_SPEED[2]=0.40  #0.20   (real value)
+WATER_SPEED[0]=0.00  #0.00   (real value)
+WATER_SPEED[1]=0.20  #0.10   (real value)
+WATER_SPEED[2]=0.40  #0.20   (real value)
 WATER_SPEED[3]=0.60  #0.30   (real value)
-#WATER_SPEED[4]=0.80  #0.40   (real value)
+WATER_SPEED[4]=0.80  #0.40   (real value)
 #WATER_SPEED[5]=1.00  #0.50   (real value)
 
 # water direction
@@ -58,7 +58,14 @@ WD=0.0
 ##WATER_SPEED[6]=0.60
 
 # allows communication with children
-trap "kill 0" SIGINT
+trap catch_trap SIGTERM SIGINT
+
+function catch_trap() {
+    recording_stop
+    vehicle_reset
+
+    exit 1  
+}
 
 # utils
 function vehicle_reset() {
